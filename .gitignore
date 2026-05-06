@@ -430,6 +430,7 @@ FodyWeavers.xsd
 
 # Local agent memory
 MEMORY.md
+AGENTS.md
 
 # Local pi credentials for Docker benchmark runs
 .pi-agent-benchmark/*
