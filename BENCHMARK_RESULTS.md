@@ -15,6 +15,8 @@ Benchmark version: `0.1.0`
 | `run-20260505-171444` | `openai-codex/gpt-5.5:high` | 1 | 1/1 | 100% | 0.042272 | 4,634 | 449 | 11,264 | 31.4s |
 | `run-20260505-174107` | `openai-codex/gpt-5.5:high` | 20 | 18/20 | 90% | 1.495189 | 143,165 | 22,190 | 227,328 | 35m55s |
 | `run-20260505-192353` | `openrouter/tencent/hy3-preview:free:high` | 20 | 14/20 | 70% | 0.000000 | 80,580 | 46,324 | 433,664 | 38m49s |
+| `run-20260506` | `openrouter/baidu/cobuddy:free:high` | 20 | 3/20 | 15% | 0.000000 | 35,666 | 2,720 | 5,696 | 5m37s |
+| `run-20260506-2` | `openrouter/baidu/cobuddy:free:high` | 20 | 4/20 | 20% | 0.000000 | 37,357 | 2,643 | 13,440 | 18m46s |
 
 ## Result locations
 
@@ -32,22 +34,24 @@ results/benchmark-0.1.0/openai-codex_gpt-5.5_high/run-20260505-170155/
 results/benchmark-0.1.0/openai-codex_gpt-5.5_high/run-20260505-171444/
 results/benchmark-0.1.0/openai-codex_gpt-5.5_high/run-20260505-174107/
 results/benchmark-0.1.0/openrouter_tencent_hy3-preview_free_high/run-20260505-192353/
+results/benchmark-0.1.0/openrouter_baidu_cobuddy_free_high/run-20260506/
+results/benchmark-0.1.0/openrouter_baidu_cobuddy_free_high/run-20260506-2/
 ```
 
 New runs created after the run-folder change use date-only names such as `run-20260505`. If another run for the same model/date already exists, the runner appends a numeric suffix such as `run-20260505-2`.
 
 ## Full 20-scenario comparison
 
-| Category | `openai-codex/gpt-5.5:high` | `openrouter/tencent/hy3-preview:free:high` |
-|---|---:|---:|
-| API bug fixing | 4/4 | 2/4 |
-| EF Core | 4/4 | 3/4 |
-| Authentication/authorization | 2/3 | 2/3 |
-| BDD with Reqnroll | 3/3 | 2/3 |
-| Performance | 2/2 | 2/2 |
-| Architectural refactoring | 1/2 | 1/2 |
-| Testing | 2/2 | 2/2 |
-| **Total** | **18/20** | **14/20** |
+| Category | `openai-codex/gpt-5.5:high` | `openrouter/tencent/hy3-preview:free:high` | `openrouter/baidu/cobuddy:free:high` after provider retries |
+|---|---:|---:|---:|
+| API bug fixing | 4/4 | 2/4 | 2/4 |
+| EF Core | 4/4 | 3/4 | 1/4 |
+| Authentication/authorization | 2/3 | 2/3 | 0/3 |
+| BDD with Reqnroll | 3/3 | 2/3 | 1/3 |
+| Performance | 2/2 | 2/2 | 0/2 |
+| Architectural refactoring | 1/2 | 1/2 | 0/2 |
+| Testing | 2/2 | 2/2 | 0/2 |
+| **Total** | **18/20** | **14/20** | **4/20** |
 
 ## Failed scenarios by model
 
@@ -83,10 +87,28 @@ Before the 20-scenario dataset existed, three exploratory runs were executed aga
 | `run-20260505-170155` | Re-run after generated-artifact cleanup. Passed with clean source diff. |
 | `run-20260505-171444` | Re-run after removing an obvious bug comment from the fixture. Passed with clean source diff. |
 
+## Provider retry run
+
+After adding provider-error retries, `openrouter/baidu/cobuddy:free:high` was run again as `run-20260506-2`.
+
+Retry summary:
+
+```text
+Total scenarios: 20
+Passed: 4/20
+Total agent attempts: 57
+Provider retry errors before final attempts: 37
+Final provider errors after retries: 17
+Repeated provider error: Failed to calculate accounting data
+```
+
+The retry policy recovered one additional scenario compared to the first CoBuddy run, but the OpenRouter/Baidu provider error remained frequent.
+
 ## Interpretation
 
 - `openai-codex/gpt-5.5:high` currently performs best on the local 20-scenario benchmark, with a 90% pass rate.
 - `openrouter/tencent/hy3-preview:free:high` completed the same dataset with a 70% pass rate and zero reported cost.
-- Both models failed `auth-tenant-isolation-001` on the same hidden edge case, which suggests that the scenario wording should be reviewed for fairness.
-- Both models struggled with `refactor-clock-service-001`, but for different validation stages.
-- The benchmark is still version `0.1.0`; scenario wording, hidden-test fairness, scoring, and reporting are expected to evolve.
+- `openrouter/baidu/cobuddy:free:high` had severe provider stability issues in these local runs. Even with up to 3 attempts per scenario, 17 final attempts still ended with `Failed to calculate accounting data`.
+- Both GPT-5.5 and Hy3 failed `auth-tenant-isolation-001` on the same hidden edge case, which suggests that the scenario wording should be reviewed for fairness.
+- GPT-5.5 and Hy3 both struggled with `refactor-clock-service-001`, but for different validation stages.
+- The benchmark is still version `0.1.0`; scenario wording, hidden-test fairness, scoring, retry policy, and reporting are expected to evolve.
