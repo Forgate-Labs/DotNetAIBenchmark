@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -173,7 +174,7 @@ sealed class BenchmarkApp(CliOptions options)
         var started = overallStarted;
         var ended = attempt.EndedAt;
 
-        var validation = await ValidateScenarioAsync(workspace, task, timeout);
+        var validation = await ValidateScenarioAsync(workspace, task, model, repetition, timeout);
         var diff = await ProcessRunner.RunAsync("git", ["diff", "--", "."], workspace, TimeSpan.FromSeconds(30));
         await File.WriteAllTextAsync(Path.Combine(workspace, "pi.stdout.jsonl"), proc.Stdout);
         await File.WriteAllTextAsync(Path.Combine(workspace, "pi.stderr.log"), proc.Stderr);
@@ -231,12 +232,17 @@ sealed class BenchmarkApp(CliOptions options)
         await ProcessRunner.RunAsync("git", ["clean", "-fdx", "-e", "pi.attempt-*.stdout.jsonl", "-e", "pi.attempt-*.stderr.log"], workspace, TimeSpan.FromSeconds(30));
     }
 
-    private async Task<ValidationResult> ValidateScenarioAsync(string workspace, BenchmarkTask task, TimeSpan timeout)
+    private async Task<ValidationResult> ValidateScenarioAsync(string workspace, BenchmarkTask task, string model, int repetition, TimeSpan timeout)
     {
-        var publicCommands = await ValidateAsync(workspace, task.ValidationCommands, timeout, "public");
-        var hiddenCommands = new List<ValidationCommandResult>();
+        var validationContext = CreateValidationContext(workspace, task, model, repetition);
+        var items = GetEvaluationItems(task);
+        var publicItems = items.Where(item => IsPublicSuite(item.Suite)).ToArray();
+        var hiddenItems = items.Where(item => IsHiddenSuite(item.Suite)).ToArray();
 
-        if (publicCommands.All(command => command.ExitCode == 0 && !command.TimedOut) && task.HiddenValidationCommands.Length > 0)
+        var publicEvaluations = await ValidateEvaluationItemsAsync(workspace, publicItems, timeout, validationContext);
+        var hiddenEvaluations = new List<EvaluationItemResult>();
+
+        if (publicEvaluations.All(item => item.Passed) && hiddenItems.Length > 0)
         {
             var hiddenSource = Path.Combine(task.Fixture, "hidden-tests");
             if (Directory.Exists(hiddenSource))
@@ -244,49 +250,114 @@ sealed class BenchmarkApp(CliOptions options)
                 CopyDirectory(hiddenSource, Path.Combine(workspace, "hidden-tests"));
             }
 
-            hiddenCommands = await ValidateAsync(workspace, task.HiddenValidationCommands, timeout, "hidden");
+            hiddenEvaluations = await ValidateEvaluationItemsAsync(workspace, hiddenItems, timeout, validationContext);
         }
 
-        var commands = publicCommands.Concat(hiddenCommands).ToList();
+        var evaluations = publicEvaluations.Concat(hiddenEvaluations).ToList();
+        var commands = evaluations.Select(ToValidationCommandResult).ToList();
+        var publicCommands = publicEvaluations.Select(ToValidationCommandResult).ToList();
+        var hiddenCommands = hiddenEvaluations.Select(ToValidationCommandResult).ToList();
+        var totalWeight = items.Sum(item => item.Weight <= 0 ? 1 : item.Weight);
+        var earnedWeight = evaluations.Where(item => item.Passed).Sum(item => item.Weight);
+
         return new ValidationResult
         {
-            Passed = commands.Count == task.ValidationCommands.Length + task.HiddenValidationCommands.Length
-                     && commands.All(command => command.ExitCode == 0 && !command.TimedOut),
+            Passed = evaluations.Count == items.Length && evaluations.All(item => item.Passed),
+            EarnedWeight = earnedWeight,
+            TotalWeight = totalWeight,
+            EvaluationItems = evaluations,
             Commands = commands,
             PublicCommands = publicCommands,
             HiddenCommands = hiddenCommands
         };
     }
 
-    private async Task<List<ValidationCommandResult>> ValidateAsync(string workspace, string[] commands, TimeSpan timeout, string suite)
+    private async Task<List<EvaluationItemResult>> ValidateEvaluationItemsAsync(string workspace, BenchmarkEvaluationItem[] items, TimeSpan defaultTimeout, ValidationContext validationContext)
     {
-        var outputs = new List<ValidationCommandResult>();
-        foreach (var command in commands)
+        var outputs = new List<EvaluationItemResult>();
+        foreach (var item in items)
         {
-            Console.WriteLine($"[validate:{suite}] {command}");
+            var timeout = TimeSpan.FromSeconds(item.TimeoutSeconds > 0 ? item.TimeoutSeconds : (int)defaultTimeout.TotalSeconds);
+            var hostCommand = TryGetHostCommand(item.Command, out var shellCommand);
+            Console.WriteLine($"[evaluate:{item.Suite}:{item.Id}{(hostCommand ? ":host" : ":docker")}] {shellCommand}");
             var started = DateTimeOffset.UtcNow;
-            var result = await ProcessRunner.RunAsync(
-                "docker",
-                DockerArgs(workspace, ["bash", "-lc", command]),
-                Directory.GetCurrentDirectory(),
-                timeout);
+            var result = hostCommand
+                ? await ProcessRunner.RunAsync(
+                    "bash",
+                    ["-lc", shellCommand],
+                    workspace,
+                    timeout,
+                    validationContext.Environment)
+                : await ProcessRunner.RunAsync(
+                    "docker",
+                    DockerArgs(workspace, ["bash", "-lc", shellCommand]),
+                    Directory.GetCurrentDirectory(),
+                    timeout);
             var ended = DateTimeOffset.UtcNow;
-            outputs.Add(new ValidationCommandResult
+            var passed = result.ExitCode == 0 && !result.TimedOut;
+            var weight = item.Weight <= 0 ? 1 : item.Weight;
+            outputs.Add(new EvaluationItemResult
             {
-                Suite = suite,
-                Command = command,
+                Id = item.Id,
+                Name = item.Name,
+                Suite = item.Suite,
+                Command = item.Command,
+                Weight = weight,
+                EarnedWeight = passed ? weight : 0,
                 ExitCode = result.ExitCode,
                 TimedOut = result.TimedOut,
                 DurationMs = (long)(ended - started).TotalMilliseconds,
                 StdoutTail = LastLines(result.Stdout, 80),
-                StderrTail = LastLines(result.Stderr, 80)
+                StderrTail = LastLines(result.Stderr, 80),
+                Passed = passed
             });
 
-            if (result.ExitCode != 0 || result.TimedOut) break;
+            if (!passed) break;
         }
 
         return outputs;
     }
+
+    private static ValidationCommandResult ToValidationCommandResult(EvaluationItemResult item) => new()
+    {
+        Suite = item.Suite,
+        Command = item.Command,
+        ExitCode = item.ExitCode,
+        TimedOut = item.TimedOut,
+        DurationMs = item.DurationMs,
+        StdoutTail = item.StdoutTail,
+        StderrTail = item.StderrTail
+    };
+
+    private static BenchmarkEvaluationItem[] GetEvaluationItems(BenchmarkTask task)
+    {
+        if (task.EvaluationItems.Length > 0)
+        {
+            return task.EvaluationItems.Select((item, index) => item.Normalized(index + 1)).ToArray();
+        }
+
+        return task.ValidationCommands.Select((command, index) => new BenchmarkEvaluationItem
+            {
+                Id = $"public-{index + 1}",
+                Name = $"Public validation {index + 1}",
+                Suite = "public",
+                Command = command,
+                Weight = 1
+            })
+            .Concat(task.HiddenValidationCommands.Select((command, index) => new BenchmarkEvaluationItem
+            {
+                Id = $"hidden-{index + 1}",
+                Name = $"Hidden validation {index + 1}",
+                Suite = "hidden",
+                Command = command,
+                Weight = 1
+            }))
+            .ToArray();
+    }
+
+    private static bool IsPublicSuite(string? suite) => !IsHiddenSuite(suite);
+
+    private static bool IsHiddenSuite(string? suite) => string.Equals(suite?.Trim(), "hidden", StringComparison.OrdinalIgnoreCase);
 
     private List<string> DockerArgs(string workspace, IReadOnlyList<string> command)
     {
@@ -303,6 +374,13 @@ sealed class BenchmarkApp(CliOptions options)
 
             args.AddRange(["-v", $"{piAgentDir}:/pi-agent"]);
             args.AddRange(["-e", "PI_CODING_AGENT_DIR=/pi-agent"]);
+        }
+
+        var codePassDir = ResolveCodePassDir();
+        if (codePassDir is not null)
+        {
+            args.AddRange(["-v", $"{codePassDir}:/codepass:ro"]);
+            args.AddRange(["-e", "CODEPASS_DIR=/codepass"]);
         }
 
         if (options.AuthMode is "mount" or "env")
@@ -339,6 +417,7 @@ sealed class BenchmarkApp(CliOptions options)
         - You may use read, bash, edit, and write.
         - Do not ask the user for confirmation.
         - Run the validation commands when appropriate.
+        - If a .NET project exists, run `dotnet list package --vulnerable --include-transitive` before finishing and avoid vulnerable package versions.
         - Stop when the task is complete.
         - At the end, respond with a short summary in English.
         """;
@@ -357,8 +436,12 @@ sealed class BenchmarkApp(CliOptions options)
         return tasks;
     }
 
-    private static void WriteReport(string runDir, BenchmarkReport report) =>
+    private static void WriteReport(string runDir, BenchmarkReport report)
+    {
+        report.EarnedEvaluationWeight = report.Results.Sum(r => r.Validation.EarnedWeight);
+        report.TotalEvaluationWeight = report.Results.Sum(r => r.Validation.TotalWeight);
         File.WriteAllText(Path.Combine(runDir, "report.json"), JsonSerializer.Serialize(report, JsonOptions));
+    }
 
     private static void WriteMarkdownSummary(string runDir, BenchmarkReport report)
     {
@@ -367,13 +450,18 @@ sealed class BenchmarkApp(CliOptions options)
         sb.AppendLine();
         sb.AppendLine($"Benchmark version: `{report.BenchmarkVersion}`");
         sb.AppendLine();
-        sb.AppendLine("| Task | Model | Rep | Passed | Attempts | Provider errors | Duration ms | TTFT ms | Tool calls | Bash | Tokens in | Tokens out | Cost |");
-        sb.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+        sb.AppendLine("| Task | Model | Rep | Passed | Eval points | Attempts | Provider errors | Duration ms | TTFT ms | Tool calls | Bash | Tokens in | Tokens out | Cost |");
+        sb.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
         foreach (var r in report.Results)
         {
             var providerErrorCount = r.ProviderRetryErrors.Count + r.ProviderErrors.Count;
-            sb.AppendLine($"| {r.TaskId} | `{r.Model}` | {r.Repetition} | {r.Passed} | {r.AgentAttempts} | {providerErrorCount} | {r.DurationMs} | {r.TimeToFirstTokenMs?.ToString() ?? ""} | {r.PiMetrics.ToolCalls} | {r.PiMetrics.BashCalls} | {r.PiMetrics.InputTokens} | {r.PiMetrics.OutputTokens} | {r.PiMetrics.TotalCost:0.####} |");
+            sb.AppendLine($"| {r.TaskId} | `{r.Model}` | {r.Repetition} | {r.Passed} | {r.Validation.EarnedWeight:0.##}/{r.Validation.TotalWeight:0.##} | {r.AgentAttempts} | {providerErrorCount} | {r.DurationMs} | {r.TimeToFirstTokenMs?.ToString() ?? ""} | {r.PiMetrics.ToolCalls} | {r.PiMetrics.BashCalls} | {r.PiMetrics.InputTokens} | {r.PiMetrics.OutputTokens} | {r.PiMetrics.TotalCost:0.####} |");
         }
+
+        var earnedWeight = report.Results.Sum(r => r.Validation.EarnedWeight);
+        var totalWeight = report.Results.Sum(r => r.Validation.TotalWeight);
+        sb.AppendLine();
+        sb.AppendLine($"Evaluation points: `{earnedWeight:0.##}/{totalWeight:0.##}`");
         File.WriteAllText(Path.Combine(runDir, "summary.md"), sb.ToString());
     }
 
@@ -382,6 +470,17 @@ sealed class BenchmarkApp(CliOptions options)
         await ProcessRunner.RunAsync("git", ["init"], workspace, TimeSpan.FromSeconds(30));
         await ProcessRunner.RunAsync("git", ["add", "."], workspace, TimeSpan.FromSeconds(30));
         await ProcessRunner.RunAsync("git", ["-c", "user.email=benchmark@example.local", "-c", "user.name=Benchmark", "commit", "-m", "baseline"], workspace, TimeSpan.FromSeconds(30));
+    }
+
+    private static string? ResolveCodePassDir()
+    {
+        var raw = Environment.GetEnvironmentVariable("CODEPASS_DIR")
+                  ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "CodePass");
+        if (raw.StartsWith("~/", StringComparison.Ordinal))
+            raw = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), raw[2..]);
+
+        var fullPath = Path.GetFullPath(raw);
+        return Directory.Exists(fullPath) ? fullPath : null;
     }
 
     private static string ResolvePiAgentDir(string? configured)
@@ -396,6 +495,38 @@ sealed class BenchmarkApp(CliOptions options)
     }
 
     private static string SafeName(string value) => Regex.Replace(value, "[^a-zA-Z0-9_.-]+", "_").Trim('_');
+
+    private static string SafeDockerName(string value) => Regex.Replace(value.ToLowerInvariant(), "[^a-z0-9_-]+", "_").Trim('_', '-');
+
+    private static string ShortHash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant()[..12];
+
+    private static bool TryGetHostCommand(string command, out string shellCommand)
+    {
+        const string prefix = "host:";
+        if (command.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            shellCommand = command[prefix.Length..].TrimStart();
+            return true;
+        }
+
+        shellCommand = command;
+        return false;
+    }
+
+    private static ValidationContext CreateValidationContext(string workspace, BenchmarkTask task, string model, int repetition)
+    {
+        var id = SafeDockerName($"{task.Id}-{SafeName(model)}-rep-{repetition}-{ShortHash(Path.GetFullPath(workspace))}");
+        if (string.IsNullOrWhiteSpace(id)) id = $"validation_{ShortHash(workspace)}";
+
+        return new ValidationContext(new Dictionary<string, string>
+        {
+            ["DOTNET_AI_BENCHMARK_VALIDATION_ID"] = id,
+            ["DOTNET_AI_BENCHMARK_DOCKER_IMAGE_TAG"] = $"dotnet-ai-benchmark-validation-{id}:latest",
+            ["COMPOSE_PROJECT_NAME"] = $"dotnet_ai_benchmark_{id.Replace('-', '_')}",
+            ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1",
+            ["DOTNET_NOLOGO"] = "1"
+        });
+    }
 
     private static string GetUniqueRunDirectory(string resultsDir, string benchmarkVersion, string modelHistoryName, string runId)
     {
@@ -456,7 +587,10 @@ sealed class BenchmarkApp(CliOptions options)
             "**/bin/",
             "**/obj/",
             ".vs/",
-            "*.user"
+            "*.user",
+            "TestResults/",
+            "**/TestResults/",
+            "codepass-quality.json"
         };
 
         var builder = new StringBuilder(existing);
@@ -491,7 +625,7 @@ sealed class BenchmarkApp(CliOptions options)
 
 static class BenchmarkMetadata
 {
-    public const string Version = "0.1.0";
+    public const string Version = "0.2.0";
 }
 
 sealed class PiJsonMetricsParser
@@ -559,10 +693,10 @@ sealed class PiJsonMetricsParser
 
 static class ProcessRunner
 {
-    public static async Task<ProcessResult> RunAsync(string fileName, IReadOnlyList<string> args, string workingDirectory, TimeSpan timeout) =>
-        await RunStreamingAsync(fileName, args, workingDirectory, timeout, stdoutLine: null);
+    public static async Task<ProcessResult> RunAsync(string fileName, IReadOnlyList<string> args, string workingDirectory, TimeSpan timeout, IReadOnlyDictionary<string, string>? environment = null) =>
+        await RunStreamingAsync(fileName, args, workingDirectory, timeout, stdoutLine: null, environment);
 
-    public static async Task<ProcessResult> RunStreamingAsync(string fileName, IReadOnlyList<string> args, string workingDirectory, TimeSpan timeout, Action<string>? stdoutLine)
+    public static async Task<ProcessResult> RunStreamingAsync(string fileName, IReadOnlyList<string> args, string workingDirectory, TimeSpan timeout, Action<string>? stdoutLine, IReadOnlyDictionary<string, string>? environment = null)
     {
         using var cts = new CancellationTokenSource(timeout);
         var stdout = new StringBuilder();
@@ -575,6 +709,13 @@ static class ProcessRunner
         process.StartInfo.RedirectStandardError = true;
         process.StartInfo.UseShellExecute = false;
         process.StartInfo.CreateNoWindow = true;
+        if (environment is not null)
+        {
+            foreach (var (key, value) in environment)
+            {
+                process.StartInfo.Environment[key] = value;
+            }
+        }
 
         process.Start();
 
@@ -613,6 +754,8 @@ static class ProcessRunner
 }
 
 sealed record ProcessResult(int ExitCode, bool TimedOut, string Stdout, string Stderr);
+
+sealed record ValidationContext(IReadOnlyDictionary<string, string> Environment);
 
 sealed record PiRunAttempt(int AttemptNumber, DateTimeOffset StartedAt, DateTimeOffset EndedAt, ProcessResult Process, PiJsonMetricsParser Parser)
 {
@@ -702,6 +845,8 @@ sealed class CliOptions
           --skip-auth-check    Do not run an authentication dry run before the tasks.
           --provider-retries   Attempts per scenario when provider errors occur. Default: 3
           --realistic          Load pi skills/extensions/context files. Default is controlled, without skills/extensions/context files.
+
+        Validation commands run inside Docker by default. Prefix a validation command with 'host:' to run it on the host from the workspace directory. Host validation receives unique DOTNET_AI_BENCHMARK_VALIDATION_ID, DOTNET_AI_BENCHMARK_DOCKER_IMAGE_TAG, and COMPOSE_PROJECT_NAME values to avoid Docker resource conflicts during parallel runs.
         """);
     }
 
@@ -728,7 +873,28 @@ sealed class BenchmarkTask
     public string Prompt { get; set; } = "";
     public string[] ValidationCommands { get; set; } = [];
     public string[] HiddenValidationCommands { get; set; } = [];
+    public BenchmarkEvaluationItem[] EvaluationItems { get; set; } = [];
     public int TimeoutSeconds { get; set; } = 600;
+}
+
+sealed class BenchmarkEvaluationItem
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Suite { get; set; } = "public";
+    public string Command { get; set; } = "";
+    public decimal Weight { get; set; } = 1;
+    public int TimeoutSeconds { get; set; }
+
+    public BenchmarkEvaluationItem Normalized(int index) => new()
+    {
+        Id = string.IsNullOrWhiteSpace(Id) ? $"evaluation-{index}" : Id,
+        Name = string.IsNullOrWhiteSpace(Name) ? (string.IsNullOrWhiteSpace(Id) ? $"Evaluation {index}" : Id) : Name,
+        Suite = string.IsNullOrWhiteSpace(Suite) ? "public" : Suite.Trim().ToLowerInvariant(),
+        Command = Command,
+        Weight = Weight <= 0 ? 1 : Weight,
+        TimeoutSeconds = TimeoutSeconds
+    };
 }
 
 sealed class BenchmarkReport
@@ -741,6 +907,8 @@ sealed class BenchmarkReport
     public string Dataset { get; set; } = "";
     public string PiAgentDir { get; set; } = "";
     public bool Controlled { get; set; }
+    public decimal EarnedEvaluationWeight { get; set; }
+    public decimal TotalEvaluationWeight { get; set; }
     public List<ModelRunResult> Results { get; set; } = [];
 }
 
@@ -783,9 +951,28 @@ sealed class PiMetrics
 sealed class ValidationResult
 {
     public bool Passed { get; set; }
+    public decimal EarnedWeight { get; set; }
+    public decimal TotalWeight { get; set; }
+    public List<EvaluationItemResult> EvaluationItems { get; set; } = [];
     public List<ValidationCommandResult> Commands { get; set; } = [];
     public List<ValidationCommandResult> PublicCommands { get; set; } = [];
     public List<ValidationCommandResult> HiddenCommands { get; set; } = [];
+}
+
+sealed class EvaluationItemResult
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Suite { get; set; } = "";
+    public string Command { get; set; } = "";
+    public decimal Weight { get; set; }
+    public decimal EarnedWeight { get; set; }
+    public int ExitCode { get; set; }
+    public bool TimedOut { get; set; }
+    public long DurationMs { get; set; }
+    public string StdoutTail { get; set; } = "";
+    public string StderrTail { get; set; } = "";
+    public bool Passed { get; set; }
 }
 
 sealed class ValidationCommandResult

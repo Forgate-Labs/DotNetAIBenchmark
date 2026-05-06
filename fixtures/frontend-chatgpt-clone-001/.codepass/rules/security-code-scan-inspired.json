@@ -1,0 +1,1103 @@
+[
+  {
+    "id": "CP-SCS0001",
+    "title": "SCS0001 command injection guard",
+    "description": "Inspired by Security Code Scan SCS0001. Avoid direct process execution with dynamic values.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "error",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.Diagnostics.Process.Start",
+        "System.Diagnostics.Process"
+      ],
+      "allowedAlternatives": [
+        "avoid shell execution",
+        "strict allow-list validation"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0002",
+    "title": "SCS0002 SQL injection guard",
+    "description": "Inspired by Security Code Scan SCS0002. Prefer parameterized queries and avoid raw SQL APIs.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "error",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "Microsoft.EntityFrameworkCore.RelationalQueryableExtensions.FromSqlRaw",
+        "Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.ExecuteSqlRaw",
+        "System.Data.SqlClient.SqlCommand",
+        "Microsoft.Data.SqlClient.SqlCommand"
+      ],
+      "allowedAlternatives": [
+        "parameterized queries",
+        "FromSqlInterpolated",
+        "LINQ"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0003",
+    "title": "SCS0003 XPath injection guard",
+    "description": "Inspired by Security Code Scan SCS0003. Avoid dynamic XPath query APIs.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.Xml.XPath.XPathNavigator.Select",
+        "System.Xml.XPath.XPathExpression.Compile",
+        "System.Xml.XmlNode.SelectNodes",
+        "System.Xml.XmlNode.SelectSingleNode"
+      ],
+      "allowedAlternatives": [
+        "validated allow-listed XPath",
+        "strongly typed XML parsing"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0007",
+    "title": "SCS0007 XXE guard",
+    "description": "Inspired by Security Code Scan SCS0007. Avoid XML APIs that are commonly misconfigured for external entity processing.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.Xml.XmlDocument",
+        "System.Xml.XmlTextReader",
+        "System.Xml.XmlReader.Create"
+      ],
+      "allowedAlternatives": [
+        "XmlReaderSettings with DtdProcessing.Prohibit and XmlResolver null"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0018",
+    "title": "SCS0018 path traversal guard",
+    "description": "Inspired by Security Code Scan SCS0018. Avoid direct file-system access from application flows without canonical path validation.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.IO.File.Open",
+        "System.IO.File.OpenRead",
+        "System.IO.File.OpenWrite",
+        "System.IO.File.ReadAllText",
+        "System.IO.File.WriteAllText",
+        "System.IO.Directory.GetFiles"
+      ],
+      "allowedAlternatives": [
+        "validated storage abstraction",
+        "canonical path allow-list"
+      ],
+      "allowInTests": true
+    }
+  },
+  {
+    "id": "CP-SCS0029",
+    "title": "SCS0029 XSS guard",
+    "description": "Inspired by Security Code Scan SCS0029. Avoid bypassing Razor or Blazor HTML encoding.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "error",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "Microsoft.AspNetCore.Html.HtmlString",
+        "Microsoft.AspNetCore.Components.MarkupString"
+      ],
+      "allowedAlternatives": [
+        "encoded Razor or Blazor rendering",
+        "sanitized content"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0026",
+    "title": "SCS0026 LDAP distinguished name injection guard",
+    "description": "Inspired by Security Code Scan SCS0026. Avoid direct LDAP distinguished-name construction APIs.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.DirectoryServices.DirectoryEntry"
+      ],
+      "allowedAlternatives": [
+        "validated LDAP abstractions",
+        "proper LDAP escaping"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0031",
+    "title": "SCS0031 LDAP filter injection guard",
+    "description": "Inspired by Security Code Scan SCS0031. Avoid direct LDAP filter APIs with dynamic values.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.DirectoryServices.DirectorySearcher"
+      ],
+      "allowedAlternatives": [
+        "escaped LDAP filters",
+        "validated directory abstraction"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0004",
+    "title": "SCS0004 certificate validation must not be disabled",
+    "description": "Inspired by Security Code Scan SCS0004. Do not bypass TLS certificate validation.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "error",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.Net.ServicePointManager.ServerCertificateValidationCallback",
+        "System.Net.Http.HttpClientHandler.ServerCertificateCustomValidationCallback"
+      ],
+      "allowedAlternatives": [
+        "default certificate validation",
+        "pinned certificates with strict validation"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0005",
+    "title": "SCS0005 weak random number generator",
+    "description": "Inspired by Security Code Scan SCS0005. Do not use System.Random for security-sensitive values.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.Random"
+      ],
+      "allowedAlternatives": [
+        "System.Security.Cryptography.RandomNumberGenerator"
+      ],
+      "allowInTests": true
+    }
+  },
+  {
+    "id": "CP-SCS0006",
+    "title": "SCS0006 weak hashing functions",
+    "description": "Inspired by Security Code Scan SCS0006. Avoid obsolete hashing algorithms.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "error",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.Security.Cryptography.MD5.Create",
+        "System.Security.Cryptography.SHA1.Create",
+        "System.Security.Cryptography.HMACMD5",
+        "System.Security.Cryptography.HMACSHA1"
+      ],
+      "allowedAlternatives": [
+        "SHA256",
+        "SHA512",
+        "PasswordHasher",
+        "Argon2id or PBKDF2 for passwords"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0010",
+    "title": "SCS0010 weak cipher algorithms",
+    "description": "Inspired by Security Code Scan SCS0010. Avoid obsolete symmetric ciphers.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "error",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.Security.Cryptography.DES.Create",
+        "System.Security.Cryptography.RC2.Create",
+        "System.Security.Cryptography.TripleDES.Create",
+        "System.Security.Cryptography.DES",
+        "System.Security.Cryptography.RC2",
+        "System.Security.Cryptography.TripleDES"
+      ],
+      "allowedAlternatives": [
+        "AES-GCM",
+        "Aes with authenticated mode"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0013",
+    "title": "SCS0013 weak cipher mode",
+    "description": "Inspired by Security Code Scan SCS0013. Avoid ECB mode.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "error",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.Security.Cryptography.CipherMode.ECB"
+      ],
+      "allowedAlternatives": [
+        "authenticated encryption mode",
+        "CBC with authentication when required"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0008",
+    "title": "SCS0008 cookie secure flag guard",
+    "description": "Inspired by Security Code Scan SCS0008. Review cookie writes to ensure Secure is set.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "Microsoft.AspNetCore.Http.IResponseCookies.Append"
+      ],
+      "allowedAlternatives": [
+        "CookieOptions with Secure true"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0009",
+    "title": "SCS0009 cookie HttpOnly flag guard",
+    "description": "Inspired by Security Code Scan SCS0009. Review cookie writes to ensure HttpOnly is set where applicable.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "Microsoft.AspNetCore.Http.IResponseCookies.Append"
+      ],
+      "allowedAlternatives": [
+        "CookieOptions with HttpOnly true"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0023",
+    "title": "SCS0023 view state encryption guard",
+    "description": "Inspired by Security Code Scan SCS0023. Avoid legacy WebForms ViewState in new applications.",
+    "kind": "dependency_policy",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "sourceNamespaces": [],
+      "forbiddenNamespaces": [
+        "System.Web.UI"
+      ],
+      "forbiddenTypes": []
+    }
+  },
+  {
+    "id": "CP-SCS0024",
+    "title": "SCS0024 view state MAC guard",
+    "description": "Inspired by Security Code Scan SCS0024. Avoid legacy WebForms ViewState in new applications.",
+    "kind": "dependency_policy",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "sourceNamespaces": [],
+      "forbiddenNamespaces": [
+        "System.Web.UI"
+      ],
+      "forbiddenTypes": []
+    }
+  },
+  {
+    "id": "CP-SCS0017",
+    "title": "SCS0017 request validation disabled attribute guard",
+    "description": "Inspired by Security Code Scan SCS0017. Do not disable ASP.NET request validation.",
+    "kind": "attribute_policy",
+    "schemaVersion": "1.0",
+    "severity": "error",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*Controller.cs",
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "mode": "forbid",
+      "targetKinds": [
+        "class",
+        "method",
+        "property"
+      ],
+      "attributes": [
+        "ValidateInput",
+        "AllowHtml"
+      ],
+      "matchInherited": false
+    }
+  },
+  {
+    "id": "CP-SCS0021",
+    "title": "SCS0021 request validation disabled configuration guard",
+    "description": "Inspired by Security Code Scan SCS0021. Avoid legacy System.Web configuration APIs in new applications.",
+    "kind": "dependency_policy",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "sourceNamespaces": [],
+      "forbiddenNamespaces": [
+        "System.Web.Configuration"
+      ],
+      "forbiddenTypes": []
+    }
+  },
+  {
+    "id": "CP-SCS0030",
+    "title": "SCS0030 request validation mode guard",
+    "description": "Inspired by Security Code Scan SCS0030. Avoid legacy System.Web configuration APIs in new applications.",
+    "kind": "dependency_policy",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "sourceNamespaces": [],
+      "forbiddenNamespaces": [
+        "System.Web.Configuration"
+      ],
+      "forbiddenTypes": []
+    }
+  },
+  {
+    "id": "CP-SCS0015",
+    "title": "SCS0015 hardcoded password guard",
+    "description": "Inspired by Security Code Scan SCS0015. Avoid APIs that commonly embed credentials in application code.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.Net.NetworkCredential",
+        "System.Data.SqlClient.SqlConnection",
+        "Microsoft.Data.SqlClient.SqlConnection"
+      ],
+      "allowedAlternatives": [
+        "configuration providers",
+        "secret manager",
+        "managed identity"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0034",
+    "title": "SCS0034 password required length guard",
+    "description": "Inspired by Security Code Scan SCS0034. Review direct PasswordOptions construction and configure required length.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "Microsoft.AspNetCore.Identity.PasswordOptions"
+      ],
+      "allowedAlternatives": [
+        "centralized IdentityOptions configuration with required length"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0032",
+    "title": "SCS0032 password length too small guard",
+    "description": "Inspired by Security Code Scan SCS0032. Review direct PasswordOptions construction and avoid weak minimum lengths.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "Microsoft.AspNetCore.Identity.PasswordOptions"
+      ],
+      "allowedAlternatives": [
+        "centralized IdentityOptions configuration with strong minimum length"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0033",
+    "title": "SCS0033 password complexity guard",
+    "description": "Inspired by Security Code Scan SCS0033. Review direct PasswordOptions construction and enforce complexity where appropriate.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "Microsoft.AspNetCore.Identity.PasswordOptions"
+      ],
+      "allowedAlternatives": [
+        "centralized IdentityOptions configuration with complexity requirements"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0011",
+    "title": "SCS0011 unsafe XSLT settings guard",
+    "description": "Inspired by Security Code Scan SCS0011. Avoid XSLT APIs that can enable script or document functions.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.Xml.Xsl.XslCompiledTransform.Load",
+        "System.Xml.Xsl.XsltSettings"
+      ],
+      "allowedAlternatives": [
+        "XsltSettings with script and document functions disabled"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0016",
+    "title": "SCS0016 CSRF guard",
+    "description": "Inspired by Security Code Scan SCS0016. MVC controllers that accept state changes should use antiforgery validation.",
+    "kind": "attribute_policy",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*Controller.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "mode": "require",
+      "targetKinds": [
+        "class"
+      ],
+      "attributes": [
+        "AutoValidateAntiforgeryToken",
+        "ValidateAntiForgeryToken"
+      ],
+      "matchInherited": true
+    }
+  },
+  {
+    "id": "CP-SCS0019",
+    "title": "SCS0019 output cache conflict guard",
+    "description": "Inspired by Security Code Scan SCS0019. Avoid OutputCache on controller actions that may serve sensitive data.",
+    "kind": "attribute_policy",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*Controller.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "mode": "forbid",
+      "targetKinds": [
+        "class",
+        "method"
+      ],
+      "attributes": [
+        "OutputCache",
+        "ResponseCache"
+      ],
+      "matchInherited": true
+    }
+  },
+  {
+    "id": "CP-SCS0022",
+    "title": "SCS0022 event validation disabled guard",
+    "description": "Inspired by Security Code Scan SCS0022. Avoid legacy WebForms event validation configuration.",
+    "kind": "dependency_policy",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "sourceNamespaces": [],
+      "forbiddenNamespaces": [
+        "System.Web.UI",
+        "System.Web.Configuration"
+      ],
+      "forbiddenTypes": []
+    }
+  },
+  {
+    "id": "CP-SCS0027",
+    "title": "SCS0027 open redirect guard",
+    "description": "Inspired by Security Code Scan SCS0027. Avoid redirect APIs unless targets are local and validated.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "Microsoft.AspNetCore.Mvc.ControllerBase.Redirect",
+        "Microsoft.AspNetCore.Mvc.ControllerBase.LocalRedirect",
+        "Microsoft.AspNetCore.Http.Results.Redirect"
+      ],
+      "allowedAlternatives": [
+        "LocalRedirect with IsLocalUrl validation",
+        "known-route redirects"
+      ],
+      "allowInTests": false
+    }
+  },
+  {
+    "id": "CP-SCS0028",
+    "title": "SCS0028 insecure deserialization guard",
+    "description": "Inspired by Security Code Scan SCS0028. Avoid unsafe binary or polymorphic deserialization.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "error",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.Runtime.Serialization.Formatters.Binary.BinaryFormatter",
+        "System.Runtime.Serialization.Formatters.Binary.BinaryFormatter.Deserialize",
+        "System.Web.Script.Serialization.JavaScriptSerializer.Deserialize",
+        "Newtonsoft.Json.JsonSerializer.Deserialize"
+      ],
+      "allowedAlternatives": [
+        "System.Text.Json with explicit DTOs",
+        "safe allow-listed serializers"
+      ],
+      "allowInTests": false
+    }
+  }
+]

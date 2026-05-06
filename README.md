@@ -2,7 +2,7 @@
 
 Proof of concept: a .NET 10 CLI that evaluates coding models by running `pi` headlessly inside Docker.
 
-Current benchmark version: `0.1.0`.
+Current benchmark version: `0.2.0`.
 
 The goal is to keep benchmark executions isolated and reproducible while still using pi's provider/model/auth support.
 
@@ -17,7 +17,7 @@ This repository is a PoC, not a full benchmark product yet. It currently support
 - A local pi agent directory for credentials/settings used by Docker.
 - Authentication dry runs before benchmark tasks start.
 - A simple JSONL dataset format.
-- 20 initial .NET 10 benchmark scenarios across API bug fixing, EF Core, auth/authz, Reqnroll BDD, performance, architectural refactoring, and testing.
+- 21 .NET 10 benchmark scenarios across API bug fixing, EF Core, auth/authz, Reqnroll BDD, performance, architectural refactoring, testing, and frontend application creation.
 - Public and hidden validation suites, with hidden tests copied only after the agent run.
 - Clean source diffs that ignore generated `bin/` and `obj/` artifacts.
 - JSON and Markdown reports stored under versioned model/date history folders.
@@ -30,6 +30,7 @@ Install on the host:
 - .NET SDK 10
 - Docker
 - pi CLI
+- CodePass source at `~/CodePass` or `CODEPASS_DIR` for scenarios that run CodePass rules
 
 Check them:
 
@@ -52,7 +53,7 @@ docker ps
 ├── .pi-agent-benchmark/              # local pi config for Docker runs; secrets are ignored
 │   └── .gitkeep
 ├── datasets/
-│   └── poc-dotnet-tasks.jsonl         # PoC task dataset with 20 scenarios
+│   └── poc-dotnet-tasks.jsonl         # PoC task dataset with 21 scenarios
 ├── docker/
 │   └── pi-runner.Dockerfile           # image with .NET 10, Node.js, and pi
 ├── fixtures/
@@ -85,6 +86,7 @@ The image contains:
 - .NET SDK 10
 - Node.js 24
 - `@mariozechner/pi-coding-agent`
+- a `codepass` wrapper that installs `CodePass.Tool` from a mounted CodePass package source when available
 - basic Linux tooling such as `git`, `bash`, and `curl`
 
 ## pi authentication inside Docker
@@ -137,6 +139,25 @@ This mode is best for API keys and fully headless setups.
 Does not mount files or forward credentials.
 
 Use only for debugging command construction or Docker behavior.
+
+## CodePass CLI inside benchmark containers
+
+The runner mounts `CODEPASS_DIR` when it exists. Resolution order:
+
+1. `CODEPASS_DIR`
+2. `~/CodePass`
+
+The Docker image includes a `codepass` wrapper. The wrapper installs `CodePass.Tool` inside the disposable container from the mounted package directory:
+
+```text
+/codepass/artifacts/packages/CodePass.Tool.*.nupkg
+```
+
+Build that local package before running scenarios that ask the agent to execute CodePass:
+
+```bash
+dotnet pack ~/CodePass/src/CodePass.Cli/CodePass.Cli.csproj -c Release -o ~/CodePass/artifacts/packages
+```
 
 ## Local pi agent directory
 
@@ -368,6 +389,8 @@ Options:
   --realistic          Load pi skills/extensions/context files. Default is controlled, without skills/extensions/context files.
 ```
 
+Validation commands run inside Docker by default. Prefix a validation command with `host:` to run it on the host from the workspace directory. Host validation receives unique `DOTNET_AI_BENCHMARK_VALIDATION_ID`, `DOTNET_AI_BENCHMARK_DOCKER_IMAGE_TAG`, and `COMPOSE_PROJECT_NAME` values so Docker builds and compose commands do not conflict when benchmarks run in parallel.
+
 ## Dataset format
 
 Datasets are JSONL files. Each non-empty line is one task.
@@ -384,15 +407,25 @@ Fields:
 - `category`: grouping label for reports.
 - `fixture`: path to a disposable project fixture.
 - `prompt`: task text sent to pi.
-- `validationCommands`: public validation commands executed after pi finishes, inside Docker, outside the agent.
-- `hiddenValidationCommands`: hidden validation commands executed only after public validation passes. Hidden tests are copied into the workspace after the agent run, so the model cannot inspect them.
+- `validationCommands`: legacy public validation commands executed after pi finishes, inside Docker by default, outside the agent. Prefix with `host:` to execute a command on the host.
+- `hiddenValidationCommands`: legacy hidden validation commands executed only after public validation passes. Hidden tests are copied into the workspace after the agent run, so the model cannot inspect them. Prefix with `host:` when validation needs host resources such as the Docker daemon.
+- `evaluationItems`: optional multi-point evaluation list. When present, the runner uses these items instead of `validationCommands` and `hiddenValidationCommands`, so one agent run can produce multiple scored checks.
 - `timeoutSeconds`: timeout for the pi run and validation commands.
+
+`evaluationItems` fields:
+
+- `id`: stable evaluation identifier.
+- `name`: human-readable evaluation name.
+- `suite`: `public` or `hidden`. Hidden items run only after all public items pass and after `hidden-tests/` is copied.
+- `command`: validation command. Prefix with `host:` for host-side execution.
+- `weight`: score weight. Default is 1.
+- `timeoutSeconds`: optional item-specific timeout.
 
 ## What happens during a run
 
 For each task/model/repetition, the CLI:
 
-1. Creates a workspace under `results/benchmark-0.1.0/<model-name>/run-YYYYMMDD/workspaces/...`.
+1. Creates a workspace under `results/benchmark-0.2.0/<model-name>/run-YYYYMMDD/workspaces/...`.
 2. Copies the fixture into that workspace, excluding generated folders such as `bin/`, `obj/`, `.git/`, `.vs/`, and `hidden-tests/`.
 3. Adds workspace ignore rules for generated .NET artifacts.
 4. Initializes a git repository and commits the clean baseline.
@@ -410,7 +443,7 @@ For each task/model/repetition, the CLI:
    - output tokens
    - cache read/write tokens
    - total cost reported by pi
-10. Runs public and hidden validation commands inside Docker, outside the agent.
+10. Runs public and hidden validation commands outside the agent. Commands run inside Docker unless they use the `host:` prefix.
 11. Saves the workspace diff. Generated build artifacts are ignored so the patch focuses on source changes.
 12. Updates JSON and Markdown reports.
 
@@ -419,7 +452,7 @@ For each task/model/repetition, the CLI:
 Each benchmark run creates a versioned history directory grouped by model name and run date:
 
 ```text
-results/benchmark-0.1.0/openrouter_tencent_hy3-preview_free_high/run-20260505/
+results/benchmark-0.2.0/openrouter_tencent_hy3-preview_free_high/run-YYYYMMDD/
 ├── report.json
 ├── summary.md
 └── workspaces/
@@ -434,8 +467,8 @@ results/benchmark-0.1.0/openrouter_tencent_hy3-preview_free_high/run-20260505/
 
 Important files:
 
-- `report.json`: full structured results, including `BenchmarkVersion`, agent attempts, and provider errors.
-- `summary.md`: compact table for humans, including the benchmark version, attempt counts, and provider-error counts.
+- `report.json`: full structured results, including `BenchmarkVersion`, agent attempts, provider errors, and earned/total evaluation weights.
+- `summary.md`: compact table for humans, including the benchmark version, evaluation points, attempt counts, and provider-error counts.
 - `pi.stdout.jsonl`: raw pi JSON event stream from the final attempt.
 - `pi.stderr.log`: pi/docker stderr from the final attempt.
 - `pi.attempt-*.stdout.jsonl`: raw pi JSON event stream for each attempt.
@@ -457,7 +490,7 @@ In short:
 
 ## Scenario set
 
-The initial dataset contains 20 scenarios:
+The current dataset contains 21 scenarios. Legacy scenarios contribute one evaluation point each; the frontend scenario contributes 12 evaluation items.
 
 - 4 ASP.NET Core Minimal API bug-fixing scenarios.
 - 4 EF Core scenarios.
@@ -466,6 +499,7 @@ The initial dataset contains 20 scenarios:
 - 2 performance scenarios.
 - 2 architectural refactoring scenarios.
 - 2 unit/integration testing scenarios.
+- 1 frontend application creation scenario scored as 12 evaluation items, including CodePass rule checks, vulnerable-package checks, and host-side Docker artifact validation.
 
 Each scenario has:
 
@@ -473,7 +507,7 @@ Each scenario has:
 fixtures/<scenario-id>/
 ├── task.md
 ├── expected-behavior.md
-├── src/
+├── src/ or root project files
 ├── tests/          # public tests visible to the agent
 └── hidden-tests/   # hidden tests copied only after the agent run
 ```
@@ -492,7 +526,7 @@ dotnet test fixtures/api-order-total-001/hidden-tests/HiddenTests/HiddenTests.cs
 
 ## Latest local benchmark sample
 
-A local run with benchmark version `0.1.0` and `openai-codex/gpt-5.5:high` over the 20-scenario dataset produced this result:
+A previous local run with benchmark version `0.1.0` and `openai-codex/gpt-5.5:high` over the earlier 20-scenario dataset produced this result:
 
 ```text
 Passed: 18/20
@@ -571,7 +605,7 @@ Subscription providers may not report token cost the same way API-key providers 
 Open the run workspace and inspect:
 
 ```bash
-cd results/benchmark-0.1.0/<model-name>/run-YYYYMMDD/workspaces/<task-id>/<model>/rep-1
+cd results/benchmark-0.2.0/<model-name>/run-YYYYMMDD/workspaces/<task-id>/<model>/rep-1
 cat pi.stderr.log
 cat diff.patch
 ```

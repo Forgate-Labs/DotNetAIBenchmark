@@ -1,0 +1,341 @@
+[
+  {
+    "id": "CP-FE-MVVM-001",
+    "title": "ViewModels must stay UI-framework independent",
+    "description": "ViewModels should own state and actions without depending on Razor, Blazor component, or JavaScript runtime APIs.",
+    "kind": "dependency_policy",
+    "schemaVersion": "1.0",
+    "severity": "error",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/ViewModels/**/*.cs",
+        "**/*ViewModel.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "sourceNamespaces": [],
+      "forbiddenNamespaces": [
+        "Microsoft.AspNetCore.Components",
+        "Microsoft.JSInterop"
+      ],
+      "forbiddenTypes": []
+    }
+  },
+  {
+    "id": "CP-FE-MVVM-002",
+    "title": "Services must not depend on UI components",
+    "description": "Application services should be reusable and should not depend on Blazor component APIs.",
+    "kind": "dependency_policy",
+    "schemaVersion": "1.0",
+    "severity": "error",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/Services/**/*.cs",
+        "**/*Service.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "sourceNamespaces": [],
+      "forbiddenNamespaces": [
+        "Microsoft.AspNetCore.Components",
+        "Microsoft.JSInterop"
+      ],
+      "forbiddenTypes": []
+    }
+  },
+  {
+    "id": "CP-FE-SOLID-001",
+    "title": "Keep methods small and focused",
+    "description": "Small methods make responsibilities clearer and reduce SRP violations.",
+    "kind": "method_metrics",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "maxLines": 45,
+      "maxParameters": 5,
+      "maxCyclomaticComplexity": 10
+    }
+  },
+  {
+    "id": "CP-FE-SOLID-002",
+    "title": "Keep ViewModel actions simple",
+    "description": "ViewModel actions should delegate infrastructure work to services instead of becoming large orchestration methods.",
+    "kind": "method_metrics",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/ViewModels/**/*.cs",
+        "**/*ViewModel.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "maxLines": 35,
+      "maxParameters": 4,
+      "maxCyclomaticComplexity": 8
+    }
+  },
+  {
+    "id": "CP-FE-SOLID-003",
+    "title": "Avoid direct console output",
+    "description": "Use logging abstractions instead of direct console output in application code.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.Console.WriteLine",
+        "System.Console.Error.WriteLine"
+      ],
+      "allowedAlternatives": [
+        "Microsoft.Extensions.Logging.ILogger"
+      ],
+      "allowInTests": true
+    }
+  },
+  {
+    "id": "CP-FE-SOLID-004",
+    "title": "Avoid direct wall-clock access",
+    "description": "Inject a clock abstraction when time affects behavior or tests.",
+    "kind": "forbidden_api_usage",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbiddenSymbols": [
+        "System.DateTime.Now",
+        "System.DateTime.UtcNow",
+        "System.DateTimeOffset.Now",
+        "System.DateTimeOffset.UtcNow"
+      ],
+      "allowedAlternatives": [
+        "TimeProvider",
+        "injected clock abstraction"
+      ],
+      "allowInTests": true
+    }
+  },
+  {
+    "id": "CP-FE-SOLID-005",
+    "title": "Async code must not block",
+    "description": "Blocking async calls can deadlock Blazor Server circuits and reduce scalability.",
+    "kind": "async_policy",
+    "schemaVersion": "1.0",
+    "severity": "error",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbidAsyncVoid": true,
+      "requireCancellationToken": false,
+      "forbidBlockingCalls": true
+    }
+  },
+  {
+    "id": "CP-FE-SOLID-006",
+    "title": "Exception handling must be explicit",
+    "description": "Avoid empty catches, catch-all handlers, and throw ex patterns.",
+    "kind": "exception_handling",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "forbidEmptyCatch": true,
+      "forbidCatchAll": true,
+      "forbidThrowEx": true,
+      "requireLogging": false
+    }
+  },
+  {
+    "id": "CP-FE-NAMING-001",
+    "title": "Interfaces use the I prefix",
+    "description": "Interfaces should follow standard C# naming conventions.",
+    "kind": "symbol_naming",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "symbolKinds": [
+        "interface"
+      ],
+      "capitalization": "PascalCase",
+      "requiredPrefix": "I",
+      "allowRegex": ""
+    }
+  },
+  {
+    "id": "CP-FE-NAMING-002",
+    "title": "Classes use PascalCase",
+    "description": "Classes should follow standard C# naming conventions.",
+    "kind": "symbol_naming",
+    "schemaVersion": "1.0",
+    "severity": "warning",
+    "enabled": true,
+    "scope": {
+      "projects": [
+        "*"
+      ],
+      "files": [
+        "**/*.cs"
+      ],
+      "excludeFiles": [
+        "**/bin/**/*.cs",
+        "**/obj/**/*.cs",
+        "**/Migrations/**/*.cs",
+        "**/*.g.cs",
+        "**/*.Designer.cs",
+        "tests/**/*.cs",
+        "hidden-tests/**/*.cs"
+      ]
+    },
+    "parameters": {
+      "symbolKinds": [
+        "class"
+      ],
+      "capitalization": "PascalCase",
+      "requiredPrefix": "",
+      "allowRegex": ""
+    }
+  }
+]

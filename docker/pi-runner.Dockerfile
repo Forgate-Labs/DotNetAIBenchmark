@@ -16,4 +16,7 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+COPY docker/codepass-wrapper.sh /usr/local/bin/codepass
+RUN chmod +x /usr/local/bin/codepass
+
 WORKDIR /workspace

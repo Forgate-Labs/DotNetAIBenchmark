@@ -21,7 +21,7 @@ This split was used to reduce scenario-design bias and to make sure the benchmar
 
 ## Scenario distribution
 
-The initial dataset contains 20 scenarios:
+The current dataset contains 21 scenarios:
 
 | Category | Count | Purpose |
 |---|---:|---|
@@ -32,6 +32,7 @@ The initial dataset contains 20 scenarios:
 | Performance | 2 | Validate practical performance fixes such as allocation reduction and cancellation handling. |
 | Architectural refactoring | 2 | Validate dependency inversion, testability, and clock abstraction. |
 | Unit/integration testing | 2 | Validate edge-case testing and API integration contracts. |
+| Frontend application creation | 1 scenario / 12 evaluation items | Validate root-level Blazor Server app creation, Tailwind setup, component tests, container artifacts, and deterministic architectural heuristics. |
 
 ## Technical constraints
 
@@ -44,6 +45,7 @@ All fixtures follow these constraints where applicable:
 - xUnit for tests
 - FluentAssertions when useful
 - ASP.NET Core Minimal APIs for API scenarios
+- Blazor Server / interactive server rendering for frontend scenarios
 - EF Core for data-access scenarios
 - SQLite in-memory for EF Core scenarios
 - WebApplicationFactory for API integration tests
@@ -128,24 +130,26 @@ The fixture set includes flaws such as:
 
 Each scenario run is isolated:
 
-1. The fixture is copied to a disposable workspace under `results/benchmark-0.1.0/<model-name>/run-YYYYMMDD/workspaces/...`.
+1. The fixture is copied to a disposable workspace under `results/benchmark-0.2.0/<model-name>/run-YYYYMMDD/workspaces/...`.
 2. Generated folders such as `bin/`, `obj/`, `.git/`, `.vs/`, and `hidden-tests/` are excluded from the initial copy.
 3. A workspace `.gitignore` is created for generated .NET artifacts.
 4. A clean git baseline is committed before the agent runs.
 5. The agent runs inside Docker through `pi --mode json`.
 6. If pi reports a provider-side assistant error, the workspace is reset to the clean git baseline and the scenario is retried up to 3 attempts by default.
 7. Hidden tests are copied into the workspace only after the final agent attempt ends.
-8. Public and hidden validation commands run inside Docker, outside the agent.
-9. The final source diff is saved as `diff.patch`.
+8. Public and hidden validation commands run outside the agent. They run inside Docker by default; commands prefixed with `host:` run on the host from the workspace directory.
+9. Host validation commands receive unique `DOTNET_AI_BENCHMARK_VALIDATION_ID`, `DOTNET_AI_BENCHMARK_DOCKER_IMAGE_TAG`, and `COMPOSE_PROJECT_NAME` values so Docker resources do not collide during parallel runs.
+10. The final source diff is saved as `diff.patch`.
 
 This keeps the generated diff focused on meaningful source changes and prevents build artifacts from polluting the benchmark result.
 
 ## Validation and scoring
 
-The current PoC uses pass/fail scoring per scenario:
+The current PoC supports pass/fail scoring per scenario and weighted evaluation items:
 
-- pass: pi exits successfully and all validation commands pass
+- pass: pi exits successfully and all validation commands or evaluation items pass
 - fail: pi fails, times out, exhausts provider-error retries, public validation fails, or hidden validation fails
+- weighted item score: scenarios can define `evaluationItems` so one agent run produces multiple scored checks without duplicating the fixture in the dataset
 
 Reports are stored in versioned model/date history folders and include the benchmark version. The report also captures supporting metrics:
 
@@ -183,6 +187,7 @@ This is still a proof of concept. Current limitations include:
 - Hidden tests are in the repository, so secrecy depends on the runner excluding them from the agent workspace.
 - Scenario quality still depends on human review of task wording and hidden-test fairness.
 - Some providers may report incomplete or zero cost data, especially subscription-based providers.
+- Frontend UI fidelity is only partially deterministic. Static selectors, build/test commands, Tailwind/Docker checks, CodePass rules, vulnerable-package checks, and architecture heuristics can be validated automatically, but visual polish and exact ChatGPT likeness still benefit from human review.
 
 ## Adding a new scenario
 
@@ -190,9 +195,9 @@ To add a scenario:
 
 1. Create `fixtures/<scenario-id>/`.
 2. Add `task.md` and `expected-behavior.md`.
-3. Add a small .NET 10 source project under `src/`.
-4. Add public xUnit tests under `tests/PublicTests/`.
-5. Add hidden xUnit tests under `hidden-tests/HiddenTests/`.
+3. Add a small .NET 10 source project under `src/`, or require a root-level project when the scenario explicitly evaluates project creation/layout.
+4. Add public xUnit tests or validation scripts under `tests/PublicTests/`.
+5. Add hidden xUnit tests or validation scripts under `hidden-tests/HiddenTests/`.
 6. Add a JSONL entry to `datasets/poc-dotnet-tasks.jsonl`.
 7. Make sure the public tests fail before the fix.
 8. Make sure the hidden tests compile and fail for the initial flawed implementation.
