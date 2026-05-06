@@ -98,18 +98,30 @@ sealed class BenchmarkApp(CliOptions options)
         {
             Console.WriteLine($"[auth-check] {model}");
             var workspace = CreateTempWorkspace("auth-check");
+            const string expectedResponse = "AUTH_CHECK_OK";
             var args = DockerArgs(workspace, [
                 "pi", "--mode", "json", "--no-session", "--no-tools", "--no-context-files", "--no-skills", "--no-extensions",
                 "--model", model,
-                "Respond exactly: OK"
+                $"Respond exactly: {expectedResponse}"
             ]);
 
             var result = await ProcessRunner.RunAsync("docker", args, Directory.GetCurrentDirectory(), TimeSpan.FromSeconds(90));
-            var success = result.ExitCode == 0 && result.Stdout.Contains("agent_end", StringComparison.Ordinal);
+            var parser = ParsePiOutput(result.Stdout);
+            var actualResponse = NormalizeAuthCheckResponse(parser.Metrics.AssistantText);
+            var success = result.ExitCode == 0
+                          && !result.TimedOut
+                          && result.Stdout.Contains("agent_end", StringComparison.Ordinal)
+                          && string.Equals(actualResponse, expectedResponse, StringComparison.Ordinal);
             Console.WriteLine(success ? $"[auth-check] OK {model}" : $"[auth-check] FAILED {model}");
+            if (success && parser.Metrics.AssistantErrors.Count > 0)
+                Console.WriteLine($"[auth-check] WARN {model}: transient provider errors before a valid response: {string.Join("; ", parser.Metrics.AssistantErrors)}");
             if (!success)
             {
                 ok = false;
+                Console.Error.WriteLine($"Expected assistant response: {expectedResponse}");
+                Console.Error.WriteLine($"Actual assistant response: {actualResponse}");
+                if (parser.Metrics.AssistantErrors.Count > 0)
+                    Console.Error.WriteLine($"Provider errors: {string.Join("; ", parser.Metrics.AssistantErrors)}");
                 Console.Error.WriteLine(result.Stderr);
                 Console.Error.WriteLine(LastLines(result.Stdout, 20));
             }
@@ -461,6 +473,15 @@ sealed class BenchmarkApp(CliOptions options)
         try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch { }
     }
 
+    private static PiJsonMetricsParser ParsePiOutput(string stdout)
+    {
+        var parser = new PiJsonMetricsParser();
+        foreach (var line in stdout.Replace("\r\n", "\n").Split('\n')) parser.Observe(line);
+        return parser;
+    }
+
+    private static string NormalizeAuthCheckResponse(string text) => text.Trim().Trim('"', '`');
+
     private static string LastLines(string text, int count)
     {
         var lines = text.Replace("\r\n", "\n").Split('\n');
@@ -488,10 +509,10 @@ sealed class PiJsonMetricsParser
             if (!root.TryGetProperty("type", out var typeProp)) return;
             var type = typeProp.GetString();
 
-            if (type == "message_update" && FirstTokenAt is null && root.TryGetProperty("assistantMessageEvent", out var ev))
+            if (type == "message_update" && root.TryGetProperty("assistantMessageEvent", out var ev))
             {
                 var evType = ev.GetProperty("type").GetString();
-                if (evType is "text_delta" or "thinking_delta") FirstTokenAt = DateTimeOffset.UtcNow;
+                if (FirstTokenAt is null && evType is "text_delta" or "thinking_delta") FirstTokenAt = DateTimeOffset.UtcNow;
                 if (evType == "text_delta" && ev.TryGetProperty("delta", out var delta)) Metrics.AssistantText += delta.GetString();
             }
             else if (type == "tool_execution_start")
