@@ -434,3 +434,6 @@ MEMORY.md
 # Local pi credentials for Docker benchmark runs
 .pi-agent-benchmark/*
 !.pi-agent-benchmark/.gitkeep
+
+# Benchmark outputs
+results/

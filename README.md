@@ -2,7 +2,11 @@
 
 Proof of concept: a .NET 10 CLI that evaluates coding models by running `pi` headlessly inside Docker.
 
+Current benchmark version: `0.1.0`.
+
 The goal is to keep benchmark executions isolated and reproducible while still using pi's provider/model/auth support.
+
+See [METHODOLOGY.md](METHODOLOGY.md) for how the fixtures are designed, validated, and scored.
 
 ## Current scope
 
@@ -13,8 +17,11 @@ This repository is a PoC, not a full benchmark product yet. It currently support
 - A local pi agent directory for credentials/settings used by Docker.
 - Authentication dry runs before benchmark tasks start.
 - A simple JSONL dataset format.
-- A sample .NET 10 fixture with an intentional bug.
-- JSON and Markdown reports.
+- 20 initial .NET 10 benchmark scenarios across API bug fixing, EF Core, auth/authz, Reqnroll BDD, performance, architectural refactoring, and testing.
+- Public and hidden validation suites, with hidden tests copied only after the agent run.
+- Clean source diffs that ignore generated `bin/` and `obj/` artifacts.
+- JSON and Markdown reports stored under versioned model/date history folders.
+- Provider-error retries, with up to 3 attempts per scenario by default.
 
 ## Prerequisites
 
@@ -45,14 +52,15 @@ docker ps
 ├── .pi-agent-benchmark/              # local pi config for Docker runs; secrets are ignored
 │   └── .gitkeep
 ├── datasets/
-│   └── poc-dotnet-tasks.jsonl         # PoC task dataset
+│   └── poc-dotnet-tasks.jsonl         # PoC task dataset with 20 scenarios
 ├── docker/
 │   └── pi-runner.Dockerfile           # image with .NET 10, Node.js, and pi
 ├── fixtures/
-│   └── minimal-api-user-bug/          # sample disposable .NET fixture
+│   └── <scenario-id>/                 # disposable .NET benchmark fixtures
 ├── src/
 │   └── DotNetAIBenchmark.Cli/         # benchmark runner
 ├── DotNetAIBenchmark.slnx
+├── METHODOLOGY.md
 └── README.md
 ```
 
@@ -206,6 +214,35 @@ List available models on the host:
 pi --list-models openai
 ```
 
+## Using OpenRouter models
+
+After adding OpenRouter credentials to pi, copy the updated host auth file into the local Docker agent directory:
+
+```bash
+cp ~/.pi/agent/auth.json .pi-agent-benchmark/auth.json
+cp ~/.pi/agent/settings.json .pi-agent-benchmark/settings.json
+```
+
+The local `.pi-agent-benchmark/models.json` can define additional OpenRouter models that are not listed by the current pi build. For example, this repository has been configured locally for:
+
+```text
+openrouter/tencent/hy3-preview:free:high
+```
+
+Validate the model from inside Docker:
+
+```bash
+dotnet run --project src/DotNetAIBenchmark.Cli -- auth-check \
+  --models "openrouter/tencent/hy3-preview:free:high"
+```
+
+Run the benchmark with it:
+
+```bash
+dotnet run --project src/DotNetAIBenchmark.Cli -- \
+  --models "openrouter/tencent/hy3-preview:free:high"
+```
+
 ## Using an OpenAI API key
 
 This is the simplest fully headless OpenAI setup.
@@ -327,6 +364,7 @@ Options:
   --pi-agent-dir       pi agent directory to mount. Default: PI_CODING_AGENT_DIR, .pi-agent-benchmark, or ~/.pi/agent
   --auth-mode          mount|env|none. Default: mount
   --skip-auth-check    Do not run an authentication dry run before the tasks.
+  --provider-retries   Attempts per scenario when provider errors occur. Default: 3
   --realistic          Load pi skills/extensions/context files. Default is controlled, without skills/extensions/context files.
 ```
 
@@ -337,7 +375,7 @@ Datasets are JSONL files. Each non-empty line is one task.
 Example:
 
 ```json
-{"id":"minimal-api-user-001","category":"bugfix","fixture":"fixtures/minimal-api-user-bug","prompt":"The project contains a .NET 10 Minimal API and a failing console test. Investigate and fix the user lookup bug without removing the API. Validate with `dotnet run --project tests/Users.Api.Tests/Users.Api.Tests.csproj`.","validationCommands":["dotnet run --project tests/Users.Api.Tests/Users.Api.Tests.csproj"],"timeoutSeconds":600}
+{"id":"api-order-total-001","category":"api-bugfix","fixture":"fixtures/api-order-total-001","prompt":"Read task.md and expected-behavior.md, inspect the public tests, fix the scenario, and run `dotnet test tests/PublicTests/PublicTests.csproj`. Do not hardcode for the visible tests.","validationCommands":["dotnet test tests/PublicTests/PublicTests.csproj"],"hiddenValidationCommands":["dotnet test hidden-tests/HiddenTests/HiddenTests.csproj"],"timeoutSeconds":600}
 ```
 
 Fields:
@@ -346,19 +384,23 @@ Fields:
 - `category`: grouping label for reports.
 - `fixture`: path to a disposable project fixture.
 - `prompt`: task text sent to pi.
-- `validationCommands`: commands executed after pi finishes, inside Docker, outside the agent.
+- `validationCommands`: public validation commands executed after pi finishes, inside Docker, outside the agent.
+- `hiddenValidationCommands`: hidden validation commands executed only after public validation passes. Hidden tests are copied into the workspace after the agent run, so the model cannot inspect them.
 - `timeoutSeconds`: timeout for the pi run and validation commands.
 
 ## What happens during a run
 
 For each task/model/repetition, the CLI:
 
-1. Creates a workspace under `results/run-*/workspaces/...`.
-2. Copies the fixture into that workspace.
-3. Initializes a git repository and commits the baseline.
-4. Runs pi inside Docker with `read`, `bash`, `edit`, and `write` enabled.
-5. Parses pi JSONL events from stdout.
-6. Measures:
+1. Creates a workspace under `results/benchmark-0.1.0/<model-name>/run-YYYYMMDD/workspaces/...`.
+2. Copies the fixture into that workspace, excluding generated folders such as `bin/`, `obj/`, `.git/`, `.vs/`, and `hidden-tests/`.
+3. Adds workspace ignore rules for generated .NET artifacts.
+4. Initializes a git repository and commits the clean baseline.
+5. Runs pi inside Docker with `read`, `bash`, `edit`, and `write` enabled.
+6. Retries the scenario up to 3 times when pi reports a provider-side assistant error, resetting the workspace to the clean git baseline before each retry.
+7. Copies `hidden-tests/` into the workspace only after the final agent attempt finishes.
+8. Parses pi JSONL events from stdout.
+9. Measures:
    - total duration
    - time to first token
    - tool calls
@@ -368,16 +410,16 @@ For each task/model/repetition, the CLI:
    - output tokens
    - cache read/write tokens
    - total cost reported by pi
-7. Runs validation commands inside Docker, outside the agent.
-8. Saves the workspace diff.
-9. Updates JSON and Markdown reports.
+10. Runs public and hidden validation commands inside Docker, outside the agent.
+11. Saves the workspace diff. Generated build artifacts are ignored so the patch focuses on source changes.
+12. Updates JSON and Markdown reports.
 
 ## Outputs
 
-Each benchmark run creates a directory like:
+Each benchmark run creates a versioned history directory grouped by model name and run date:
 
 ```text
-results/run-20260505-132900/
+results/benchmark-0.1.0/openrouter_tencent_hy3-preview_free_high/run-20260505/
 ├── report.json
 ├── summary.md
 └── workspaces/
@@ -392,31 +434,87 @@ results/run-20260505-132900/
 
 Important files:
 
-- `report.json`: full structured results.
-- `summary.md`: compact table for humans.
-- `pi.stdout.jsonl`: raw pi JSON event stream.
-- `pi.stderr.log`: pi/docker stderr.
+- `report.json`: full structured results, including `BenchmarkVersion`, agent attempts, and provider errors.
+- `summary.md`: compact table for humans, including the benchmark version, attempt counts, and provider-error counts.
+- `pi.stdout.jsonl`: raw pi JSON event stream from the final attempt.
+- `pi.stderr.log`: pi/docker stderr from the final attempt.
+- `pi.attempt-*.stdout.jsonl`: raw pi JSON event stream for each attempt.
+- `pi.attempt-*.stderr.log`: pi/docker stderr for each attempt.
 - `diff.patch`: code changes made by the agent.
 
-## Sample fixture
+## Methodology
 
-The current sample fixture is:
+Fixture design and validation methodology is documented in [METHODOLOGY.md](METHODOLOGY.md).
+
+In short:
+
+- scenarios are small but realistic engineering tasks;
+- public tests provide the visible failure signal;
+- hidden tests are copied only after the agent run;
+- a scenario passes only when both public and hidden validation pass;
+- Docker isolates the execution environment;
+- `diff.patch` is generated from a clean git baseline and ignores generated artifacts.
+
+## Scenario set
+
+The initial dataset contains 20 scenarios:
+
+- 4 ASP.NET Core Minimal API bug-fixing scenarios.
+- 4 EF Core scenarios.
+- 3 authentication/authorization scenarios.
+- 3 BDD scenarios with Reqnroll.
+- 2 performance scenarios.
+- 2 architectural refactoring scenarios.
+- 2 unit/integration testing scenarios.
+
+Each scenario has:
 
 ```text
-fixtures/minimal-api-user-bug/
+fixtures/<scenario-id>/
+├── task.md
+├── expected-behavior.md
+├── src/
+├── tests/          # public tests visible to the agent
+└── hidden-tests/   # hidden tests copied only after the agent run
 ```
 
-It contains a .NET 10 Minimal API and a console validation project. The intentional bug is in user lookup logic. The validation command fails before the agent fixes it:
+Run a public suite manually:
 
 ```bash
-dotnet run --project fixtures/minimal-api-user-bug/tests/Users.Api.Tests/Users.Api.Tests.csproj
+dotnet test fixtures/api-order-total-001/tests/PublicTests/PublicTests.csproj
 ```
 
-The benchmark asks the model to investigate and fix the bug, then validates with:
+Run a hidden suite manually:
 
 ```bash
-dotnet run --project tests/Users.Api.Tests/Users.Api.Tests.csproj
+dotnet test fixtures/api-order-total-001/hidden-tests/HiddenTests/HiddenTests.csproj
 ```
+
+## Latest local benchmark sample
+
+A local run with benchmark version `0.1.0` and `openai-codex/gpt-5.5:high` over the 20-scenario dataset produced this result:
+
+```text
+Passed: 18/20
+Score: 90%
+Total reported cost: 1.495189
+Input tokens: 143,165
+Output tokens: 22,190
+```
+
+Category breakdown:
+
+```text
+api-bugfix:                 4/4
+ef-core:                    4/4
+auth-authorization:         2/3
+bdd-reqnroll:               3/3
+performance:                2/2
+architectural-refactoring:  1/2
+testing:                    2/2
+```
+
+This is a sample local run, not a stable leaderboard result. Provider availability, subscription limits, model updates, and local pi configuration can change the outcome.
 
 ## Troubleshooting
 
@@ -473,7 +571,7 @@ Subscription providers may not report token cost the same way API-key providers 
 Open the run workspace and inspect:
 
 ```bash
-cd results/run-*/workspaces/<task-id>/<model>/rep-1
+cd results/benchmark-0.1.0/<model-name>/run-YYYYMMDD/workspaces/<task-id>/<model>/rep-1
 cat pi.stderr.log
 cat diff.patch
 ```
@@ -482,7 +580,7 @@ You can also run validation manually:
 
 ```bash
 docker run --rm -v "$PWD:/workspace" -w /workspace dotnet-ai-benchmark-pi:local \
-  bash -lc "dotnet run --project tests/Users.Api.Tests/Users.Api.Tests.csproj"
+  bash -lc "dotnet test tests/PublicTests/PublicTests.csproj && dotnet test hidden-tests/HiddenTests/HiddenTests.csproj"
 ```
 
 ## Security notes

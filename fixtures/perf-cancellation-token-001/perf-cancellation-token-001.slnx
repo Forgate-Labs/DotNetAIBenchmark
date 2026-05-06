@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/perf-cancellation-token-001.Core/perf-cancellation-token-001.Core.csproj" />
+  <Project Path="tests/PublicTests/PublicTests.csproj" />
+  <Project Path="hidden-tests/HiddenTests/HiddenTests.csproj" />
+</Solution>

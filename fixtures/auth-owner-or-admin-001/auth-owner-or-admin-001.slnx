@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/auth-owner-or-admin-001.Api/auth-owner-or-admin-001.Api.csproj" />
+  <Project Path="tests/PublicTests/PublicTests.csproj" />
+  <Project Path="hidden-tests/HiddenTests/HiddenTests.csproj" />
+</Solution>

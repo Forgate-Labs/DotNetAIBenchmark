@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/ef-n-plus-one-001.Core/ef-n-plus-one-001.Core.csproj" />
+  <Project Path="tests/PublicTests/PublicTests.csproj" />
+  <Project Path="hidden-tests/HiddenTests/HiddenTests.csproj" />
+</Solution>

@@ -57,12 +57,14 @@ sealed class BenchmarkApp(CliOptions options)
             }
         }
 
-        var runId = $"run-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
-        var runDir = Path.GetFullPath(Path.Combine(options.ResultsDir, runId));
+        var runId = $"run-{DateTimeOffset.UtcNow:yyyyMMdd}";
+        var modelHistoryName = SafeName(string.Join("__", options.Models));
+        var runDir = GetUniqueRunDirectory(options.ResultsDir, BenchmarkMetadata.Version, modelHistoryName, runId);
         Directory.CreateDirectory(runDir);
 
         var report = new BenchmarkReport
         {
+            BenchmarkVersion = BenchmarkMetadata.Version,
             RunId = runId,
             StartedAt = DateTimeOffset.UtcNow,
             Image = options.Image,
@@ -99,7 +101,7 @@ sealed class BenchmarkApp(CliOptions options)
             var args = DockerArgs(workspace, [
                 "pi", "--mode", "json", "--no-session", "--no-tools", "--no-context-files", "--no-skills", "--no-extensions",
                 "--model", model,
-                "Responda exatamente: OK"
+                "Respond exactly: OK"
             ]);
 
             var result = await ProcessRunner.RunAsync("docker", args, Directory.GetCurrentDirectory(), TimeSpan.FromSeconds(90));
@@ -122,6 +124,7 @@ sealed class BenchmarkApp(CliOptions options)
         var workspace = Path.Combine(runDir, "workspaces", task.Id, safeModel, $"rep-{repetition}");
         Directory.CreateDirectory(Path.GetDirectoryName(workspace)!);
         CopyDirectory(Path.GetFullPath(task.Fixture), workspace);
+        EnsureWorkspaceGitIgnore(workspace);
         await InitGitAsync(workspace);
 
         Console.WriteLine($"[run] task={task.Id} model={model} rep={repetition}");
@@ -140,17 +143,25 @@ sealed class BenchmarkApp(CliOptions options)
 
         piArgs.Add(BuildPrompt(task));
 
-        var parser = new PiJsonMetricsParser();
-        var started = DateTimeOffset.UtcNow;
-        var proc = await ProcessRunner.RunStreamingAsync(
-            "docker",
-            DockerArgs(workspace, piArgs),
-            Directory.GetCurrentDirectory(),
-            timeout,
-            stdoutLine: line => parser.Observe(line));
-        var ended = DateTimeOffset.UtcNow;
+        var overallStarted = DateTimeOffset.UtcNow;
+        PiRunAttempt attempt = null!;
+        var providerRetryErrors = new List<string>();
+        for (var attemptNumber = 1; attemptNumber <= options.ProviderRetryAttempts; attemptNumber++)
+        {
+            attempt = await RunPiAttemptAsync(workspace, piArgs, timeout, attemptNumber);
+            if (!attempt.HasProviderError || attemptNumber == options.ProviderRetryAttempts) break;
 
-        var validation = await ValidateAsync(workspace, task.ValidationCommands, timeout);
+            providerRetryErrors.AddRange(attempt.ProviderErrors);
+            Console.WriteLine($"[retry] provider error for task={task.Id} model={model} attempt={attemptNumber}/{options.ProviderRetryAttempts}: {string.Join("; ", attempt.Parser.Metrics.AssistantErrors)}");
+            await ResetWorkspaceAsync(workspace);
+        }
+
+        var parser = attempt.Parser;
+        var proc = attempt.Process;
+        var started = overallStarted;
+        var ended = attempt.EndedAt;
+
+        var validation = await ValidateScenarioAsync(workspace, task, timeout);
         var diff = await ProcessRunner.RunAsync("git", ["diff", "--", "."], workspace, TimeSpan.FromSeconds(30));
         await File.WriteAllTextAsync(Path.Combine(workspace, "pi.stdout.jsonl"), proc.Stdout);
         await File.WriteAllTextAsync(Path.Combine(workspace, "pi.stderr.log"), proc.Stderr);
@@ -166,10 +177,13 @@ sealed class BenchmarkApp(CliOptions options)
             StartedAt = started,
             EndedAt = ended,
             DurationMs = (long)(ended - started).TotalMilliseconds,
-            TimeToFirstTokenMs = parser.FirstTokenAt is null ? null : (long)(parser.FirstTokenAt.Value - started).TotalMilliseconds,
+            TimeToFirstTokenMs = parser.FirstTokenAt is null ? null : (long)(parser.FirstTokenAt.Value - attempt.StartedAt).TotalMilliseconds,
             TimedOut = proc.TimedOut,
             PiExitCode = proc.ExitCode,
             PiMetrics = parser.Metrics,
+            AgentAttempts = attempt.AttemptNumber,
+            ProviderRetryErrors = providerRetryErrors,
+            ProviderErrors = attempt.ProviderErrors,
             Validation = validation,
             Passed = proc.ExitCode == 0 && !proc.TimedOut && validation.Passed
         };
@@ -181,12 +195,63 @@ sealed class BenchmarkApp(CliOptions options)
         return result;
     }
 
-    private async Task<ValidationResult> ValidateAsync(string workspace, string[] commands, TimeSpan timeout)
+    private async Task<PiRunAttempt> RunPiAttemptAsync(string workspace, IReadOnlyList<string> piArgs, TimeSpan timeout, int attemptNumber)
+    {
+        var parser = new PiJsonMetricsParser();
+        var started = DateTimeOffset.UtcNow;
+        var proc = await ProcessRunner.RunStreamingAsync(
+            "docker",
+            DockerArgs(workspace, piArgs),
+            Directory.GetCurrentDirectory(),
+            timeout,
+            stdoutLine: line => parser.Observe(line));
+        var ended = DateTimeOffset.UtcNow;
+
+        await File.WriteAllTextAsync(Path.Combine(workspace, $"pi.attempt-{attemptNumber}.stdout.jsonl"), proc.Stdout);
+        await File.WriteAllTextAsync(Path.Combine(workspace, $"pi.attempt-{attemptNumber}.stderr.log"), proc.Stderr);
+
+        return new PiRunAttempt(attemptNumber, started, ended, proc, parser);
+    }
+
+    private static async Task ResetWorkspaceAsync(string workspace)
+    {
+        await ProcessRunner.RunAsync("git", ["reset", "--hard", "HEAD"], workspace, TimeSpan.FromSeconds(30));
+        await ProcessRunner.RunAsync("git", ["clean", "-fdx", "-e", "pi.attempt-*.stdout.jsonl", "-e", "pi.attempt-*.stderr.log"], workspace, TimeSpan.FromSeconds(30));
+    }
+
+    private async Task<ValidationResult> ValidateScenarioAsync(string workspace, BenchmarkTask task, TimeSpan timeout)
+    {
+        var publicCommands = await ValidateAsync(workspace, task.ValidationCommands, timeout, "public");
+        var hiddenCommands = new List<ValidationCommandResult>();
+
+        if (publicCommands.All(command => command.ExitCode == 0 && !command.TimedOut) && task.HiddenValidationCommands.Length > 0)
+        {
+            var hiddenSource = Path.Combine(task.Fixture, "hidden-tests");
+            if (Directory.Exists(hiddenSource))
+            {
+                CopyDirectory(hiddenSource, Path.Combine(workspace, "hidden-tests"));
+            }
+
+            hiddenCommands = await ValidateAsync(workspace, task.HiddenValidationCommands, timeout, "hidden");
+        }
+
+        var commands = publicCommands.Concat(hiddenCommands).ToList();
+        return new ValidationResult
+        {
+            Passed = commands.Count == task.ValidationCommands.Length + task.HiddenValidationCommands.Length
+                     && commands.All(command => command.ExitCode == 0 && !command.TimedOut),
+            Commands = commands,
+            PublicCommands = publicCommands,
+            HiddenCommands = hiddenCommands
+        };
+    }
+
+    private async Task<List<ValidationCommandResult>> ValidateAsync(string workspace, string[] commands, TimeSpan timeout, string suite)
     {
         var outputs = new List<ValidationCommandResult>();
         foreach (var command in commands)
         {
-            Console.WriteLine($"[validate] {command}");
+            Console.WriteLine($"[validate:{suite}] {command}");
             var started = DateTimeOffset.UtcNow;
             var result = await ProcessRunner.RunAsync(
                 "docker",
@@ -196,6 +261,7 @@ sealed class BenchmarkApp(CliOptions options)
             var ended = DateTimeOffset.UtcNow;
             outputs.Add(new ValidationCommandResult
             {
+                Suite = suite,
                 Command = command,
                 ExitCode = result.ExitCode,
                 TimedOut = result.TimedOut,
@@ -207,11 +273,7 @@ sealed class BenchmarkApp(CliOptions options)
             if (result.ExitCode != 0 || result.TimedOut) break;
         }
 
-        return new ValidationResult
-        {
-            Passed = outputs.Count == commands.Length && outputs.All(o => o.ExitCode == 0 && !o.TimedOut),
-            Commands = outputs
-        };
+        return outputs;
     }
 
     private List<string> DockerArgs(string workspace, IReadOnlyList<string> command)
@@ -291,11 +353,14 @@ sealed class BenchmarkApp(CliOptions options)
         var sb = new StringBuilder();
         sb.AppendLine($"# {report.RunId}");
         sb.AppendLine();
-        sb.AppendLine("| Task | Model | Rep | Passed | Duration ms | TTFT ms | Tool calls | Bash | Tokens in | Tokens out | Cost |");
-        sb.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+        sb.AppendLine($"Benchmark version: `{report.BenchmarkVersion}`");
+        sb.AppendLine();
+        sb.AppendLine("| Task | Model | Rep | Passed | Attempts | Provider errors | Duration ms | TTFT ms | Tool calls | Bash | Tokens in | Tokens out | Cost |");
+        sb.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
         foreach (var r in report.Results)
         {
-            sb.AppendLine($"| {r.TaskId} | `{r.Model}` | {r.Repetition} | {r.Passed} | {r.DurationMs} | {r.TimeToFirstTokenMs?.ToString() ?? ""} | {r.PiMetrics.ToolCalls} | {r.PiMetrics.BashCalls} | {r.PiMetrics.InputTokens} | {r.PiMetrics.OutputTokens} | {r.PiMetrics.TotalCost:0.####} |");
+            var providerErrorCount = r.ProviderRetryErrors.Count + r.ProviderErrors.Count;
+            sb.AppendLine($"| {r.TaskId} | `{r.Model}` | {r.Repetition} | {r.Passed} | {r.AgentAttempts} | {providerErrorCount} | {r.DurationMs} | {r.TimeToFirstTokenMs?.ToString() ?? ""} | {r.PiMetrics.ToolCalls} | {r.PiMetrics.BashCalls} | {r.PiMetrics.InputTokens} | {r.PiMetrics.OutputTokens} | {r.PiMetrics.TotalCost:0.####} |");
         }
         File.WriteAllText(Path.Combine(runDir, "summary.md"), sb.ToString());
     }
@@ -320,6 +385,19 @@ sealed class BenchmarkApp(CliOptions options)
 
     private static string SafeName(string value) => Regex.Replace(value, "[^a-zA-Z0-9_.-]+", "_").Trim('_');
 
+    private static string GetUniqueRunDirectory(string resultsDir, string benchmarkVersion, string modelHistoryName, string runId)
+    {
+        var baseDir = Path.GetFullPath(Path.Combine(resultsDir, $"benchmark-{benchmarkVersion}", modelHistoryName));
+        var candidate = Path.Combine(baseDir, runId);
+        if (!Directory.Exists(candidate)) return candidate;
+
+        for (var index = 2; ; index++)
+        {
+            candidate = Path.Combine(baseDir, $"{runId}-{index}");
+            if (!Directory.Exists(candidate)) return candidate;
+        }
+    }
+
     private static string CreateTempWorkspace(string name)
     {
         var dir = Path.Combine(Path.GetTempPath(), "dotnet-ai-benchmark", name, Guid.NewGuid().ToString("N"));
@@ -331,13 +409,51 @@ sealed class BenchmarkApp(CliOptions options)
     {
         if (!Directory.Exists(source)) throw new DirectoryNotFoundException(source);
         Directory.CreateDirectory(destination);
+
         foreach (var dir in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+        {
+            if (ShouldSkipPath(source, dir, isDirectory: true)) continue;
             Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, dir)));
+        }
+
         foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
         {
+            if (ShouldSkipPath(source, file, isDirectory: false)) continue;
             var target = Path.Combine(destination, Path.GetRelativePath(source, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(file, target, overwrite: true);
         }
+    }
+
+    private static bool ShouldSkipPath(string root, string path, bool isDirectory)
+    {
+        var relative = Path.GetRelativePath(root, path);
+        var parts = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return parts.Any(part => part is "bin" or "obj" or ".git" or ".vs" or "hidden-tests")
+               || (!isDirectory && parts.Any(part => part.EndsWith(".user", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static void EnsureWorkspaceGitIgnore(string workspace)
+    {
+        var gitIgnorePath = Path.Combine(workspace, ".gitignore");
+        var existing = File.Exists(gitIgnorePath) ? File.ReadAllText(gitIgnorePath) : string.Empty;
+        var required = new[]
+        {
+            "bin/",
+            "obj/",
+            "**/bin/",
+            "**/obj/",
+            ".vs/",
+            "*.user"
+        };
+
+        var builder = new StringBuilder(existing);
+        if (builder.Length > 0 && !existing.EndsWith('\n')) builder.AppendLine();
+        foreach (var entry in required)
+        {
+            if (!existing.Split('\n').Any(line => line.Trim() == entry)) builder.AppendLine(entry);
+        }
+        File.WriteAllText(gitIgnorePath, builder.ToString());
     }
 
     private static void TryDelete(string path)
@@ -350,6 +466,11 @@ sealed class BenchmarkApp(CliOptions options)
         var lines = text.Replace("\r\n", "\n").Split('\n');
         return string.Join('\n', lines.Skip(Math.Max(0, lines.Length - count)));
     }
+}
+
+static class BenchmarkMetadata
+{
+    public const string Version = "0.1.0";
 }
 
 sealed class PiJsonMetricsParser
@@ -382,13 +503,27 @@ sealed class PiJsonMetricsParser
             {
                 if (root.TryGetProperty("isError", out var isError) && isError.GetBoolean()) Metrics.ToolErrors++;
             }
-            else if (type == "message_end" && root.TryGetProperty("message", out var message) && message.TryGetProperty("usage", out var usage))
+            else if (type == "message_end" && root.TryGetProperty("message", out var message))
             {
-                Metrics.InputTokens += ReadLong(usage, "input");
-                Metrics.OutputTokens += ReadLong(usage, "output");
-                Metrics.CacheReadTokens += ReadLong(usage, "cacheRead");
-                Metrics.CacheWriteTokens += ReadLong(usage, "cacheWrite");
-                if (usage.TryGetProperty("cost", out var cost) && cost.TryGetProperty("total", out var total)) Metrics.TotalCost += total.GetDecimal();
+                if (message.TryGetProperty("usage", out var usage))
+                {
+                    Metrics.InputTokens += ReadLong(usage, "input");
+                    Metrics.OutputTokens += ReadLong(usage, "output");
+                    Metrics.CacheReadTokens += ReadLong(usage, "cacheRead");
+                    Metrics.CacheWriteTokens += ReadLong(usage, "cacheWrite");
+                    if (usage.TryGetProperty("cost", out var cost) && cost.TryGetProperty("total", out var total)) Metrics.TotalCost += total.GetDecimal();
+                }
+
+                if (message.TryGetProperty("role", out var role)
+                    && role.GetString() == "assistant"
+                    && message.TryGetProperty("stopReason", out var stopReason)
+                    && stopReason.GetString() == "error")
+                {
+                    var error = message.TryGetProperty("errorMessage", out var errorMessage)
+                        ? errorMessage.GetString()
+                        : "Unknown provider error";
+                    Metrics.AssistantErrors.Add(error ?? "Unknown provider error");
+                }
             }
         }
         catch
@@ -458,6 +593,12 @@ static class ProcessRunner
 
 sealed record ProcessResult(int ExitCode, bool TimedOut, string Stdout, string Stderr);
 
+sealed record PiRunAttempt(int AttemptNumber, DateTimeOffset StartedAt, DateTimeOffset EndedAt, ProcessResult Process, PiJsonMetricsParser Parser)
+{
+    public bool HasProviderError => ProviderErrors.Count > 0;
+    public List<string> ProviderErrors => Parser.Metrics.AssistantErrors;
+}
+
 sealed class CliOptions
 {
     public string Command { get; init; } = "run";
@@ -473,6 +614,7 @@ sealed class CliOptions
     public bool BuildImage { get; init; }
     public bool SkipAuthCheck { get; init; }
     public bool Controlled { get; init; } = true;
+    public int ProviderRetryAttempts { get; init; } = 3;
     public bool ShowHelp { get; init; }
     public TimeSpan GlobalTimeout => TimeSpan.FromSeconds(Math.Max(300, TaskTimeoutSeconds));
 
@@ -512,6 +654,7 @@ sealed class CliOptions
             BuildImage = flags.Contains("build-image"),
             SkipAuthCheck = flags.Contains("skip-auth-check"),
             Controlled = !flags.Contains("realistic"),
+            ProviderRetryAttempts = int.Parse(dict.GetValueOrDefault("provider-retries") ?? "3"),
             ShowHelp = flags.Contains("help") || models.Length == 0
         };
     }
@@ -536,6 +679,7 @@ sealed class CliOptions
           --pi-agent-dir       pi agent directory to mount. Default: PI_CODING_AGENT_DIR, .pi-agent-benchmark, or ~/.pi/agent
           --auth-mode          mount|env|none. Default: mount
           --skip-auth-check    Do not run an authentication dry run before the tasks.
+          --provider-retries   Attempts per scenario when provider errors occur. Default: 3
           --realistic          Load pi skills/extensions/context files. Default is controlled, without skills/extensions/context files.
         """);
     }
@@ -562,11 +706,13 @@ sealed class BenchmarkTask
     public string Fixture { get; set; } = "";
     public string Prompt { get; set; } = "";
     public string[] ValidationCommands { get; set; } = [];
+    public string[] HiddenValidationCommands { get; set; } = [];
     public int TimeoutSeconds { get; set; } = 600;
 }
 
 sealed class BenchmarkReport
 {
+    public string BenchmarkVersion { get; set; } = BenchmarkMetadata.Version;
     public string RunId { get; set; } = "";
     public DateTimeOffset StartedAt { get; set; }
     public DateTimeOffset? EndedAt { get; set; }
@@ -591,6 +737,9 @@ sealed class ModelRunResult
     public bool TimedOut { get; set; }
     public int PiExitCode { get; set; }
     public PiMetrics PiMetrics { get; set; } = new();
+    public int AgentAttempts { get; set; } = 1;
+    public List<string> ProviderRetryErrors { get; set; } = [];
+    public List<string> ProviderErrors { get; set; } = [];
     public ValidationResult Validation { get; set; } = new();
     public bool Passed { get; set; }
 }
@@ -606,6 +755,7 @@ sealed class PiMetrics
     public long CacheReadTokens { get; set; }
     public long CacheWriteTokens { get; set; }
     public decimal TotalCost { get; set; }
+    public List<string> AssistantErrors { get; set; } = [];
     public string AssistantText { get; set; } = "";
 }
 
@@ -613,10 +763,13 @@ sealed class ValidationResult
 {
     public bool Passed { get; set; }
     public List<ValidationCommandResult> Commands { get; set; } = [];
+    public List<ValidationCommandResult> PublicCommands { get; set; } = [];
+    public List<ValidationCommandResult> HiddenCommands { get; set; } = [];
 }
 
 sealed class ValidationCommandResult
 {
+    public string Suite { get; set; } = "";
     public string Command { get; set; } = "";
     public int ExitCode { get; set; }
     public bool TimedOut { get; set; }

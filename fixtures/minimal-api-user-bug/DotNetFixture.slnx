@@ -1,4 +1,0 @@
-<Solution>
-  <Project Path="src/Users.Api/Users.Api.csproj" />
-  <Project Path="tests/Users.Api.Tests/Users.Api.Tests.csproj" />
-</Solution>

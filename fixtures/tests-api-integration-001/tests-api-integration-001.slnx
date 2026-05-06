@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/tests-api-integration-001.Api/tests-api-integration-001.Api.csproj" />
+  <Project Path="tests/PublicTests/PublicTests.csproj" />
+  <Project Path="hidden-tests/HiddenTests/HiddenTests.csproj" />
+</Solution>
