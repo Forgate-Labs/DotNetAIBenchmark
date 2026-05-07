@@ -176,6 +176,8 @@ sealed class BenchmarkApp(CliOptions options)
 
         var validation = await ValidateScenarioAsync(workspace, task, model, repetition, timeout);
         var diff = await ProcessRunner.RunAsync("git", ["diff", "--", "."], workspace, TimeSpan.FromSeconds(30));
+        var diffMetrics = await CollectDiffMetricsAsync(workspace, diff.Stdout);
+        await File.WriteAllTextAsync(Path.Combine(workspace, "diff-metrics.json"), JsonSerializer.Serialize(diffMetrics, JsonOptions));
         await File.WriteAllTextAsync(Path.Combine(workspace, "pi.stdout.jsonl"), proc.Stdout);
         await File.WriteAllTextAsync(Path.Combine(workspace, "pi.stderr.log"), proc.Stderr);
         await File.WriteAllTextAsync(Path.Combine(workspace, "diff.patch"), diff.Stdout);
@@ -197,6 +199,7 @@ sealed class BenchmarkApp(CliOptions options)
             AgentAttempts = attempt.AttemptNumber,
             ProviderRetryErrors = providerRetryErrors,
             ProviderErrors = attempt.ProviderErrors,
+            DiffMetrics = diffMetrics,
             Validation = validation,
             Passed = proc.ExitCode == 0 && !proc.TimedOut && validation.Passed
         };
@@ -232,6 +235,89 @@ sealed class BenchmarkApp(CliOptions options)
         await ProcessRunner.RunAsync("git", ["clean", "-fdx", "-e", "pi.attempt-*.stdout.jsonl", "-e", "pi.attempt-*.stderr.log"], workspace, TimeSpan.FromSeconds(30));
     }
 
+    private static async Task<DiffMetrics> CollectDiffMetricsAsync(string workspace, string diffText)
+    {
+        var nameStatus = await ProcessRunner.RunAsync("git", ["diff", "--name-status", "--", "."], workspace, TimeSpan.FromSeconds(30));
+        var numstat = await ProcessRunner.RunAsync("git", ["diff", "--numstat", "--", "."], workspace, TimeSpan.FromSeconds(30));
+        var packageLines = await ProcessRunner.RunAsync(
+            "bash",
+            ["-lc", "find . -name '*.csproj' -not -path '*/bin/*' -not -path '*/obj/*' -print0 | xargs -0 grep -h '<PackageReference' 2>/dev/null || true"],
+            workspace,
+            TimeSpan.FromSeconds(30));
+        var projectCount = await ProcessRunner.RunAsync(
+            "bash",
+            ["-lc", "find . -name '*.csproj' -not -path '*/bin/*' -not -path '*/obj/*' | wc -l"],
+            workspace,
+            TimeSpan.FromSeconds(30));
+
+        var metrics = new DiffMetrics
+        {
+            ChangedFiles = [],
+            AddedPackages = [],
+            ProjectCount = int.TryParse(projectCount.Stdout.Trim(), out var projects) ? projects : 0
+        };
+
+        var changed = new Dictionary<string, ChangedFileMetric>(StringComparer.Ordinal);
+        foreach (var line in nameStatus.Stdout.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.Split('\t', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2) continue;
+            var status = parts[0];
+            var path = parts[^1];
+            var item = new ChangedFileMetric
+            {
+                Path = path,
+                Status = status,
+                Extension = Path.GetExtension(path)
+            };
+            changed[path] = item;
+        }
+
+        foreach (var line in numstat.Stdout.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.Split('\t');
+            if (parts.Length < 3) continue;
+            var path = parts[2];
+            if (!changed.TryGetValue(path, out var item))
+            {
+                item = new ChangedFileMetric { Path = path, Status = "M", Extension = Path.GetExtension(path) };
+                changed[path] = item;
+            }
+
+            item.AddedLines = int.TryParse(parts[0], out var added) ? added : 0;
+            item.DeletedLines = int.TryParse(parts[1], out var deleted) ? deleted : 0;
+        }
+
+        metrics.ChangedFiles = changed.Values.OrderBy(file => file.Path, StringComparer.Ordinal).ToList();
+        metrics.AddedFileCount = metrics.ChangedFiles.Count(file => file.Status.StartsWith('A'));
+        metrics.ModifiedFileCount = metrics.ChangedFiles.Count(file => file.Status.StartsWith('M'));
+        metrics.DeletedFileCount = metrics.ChangedFiles.Count(file => file.Status.StartsWith('D'));
+        metrics.RenamedFileCount = metrics.ChangedFiles.Count(file => file.Status.StartsWith('R'));
+        metrics.TotalChangedFileCount = metrics.ChangedFiles.Count;
+        metrics.AddedLines = metrics.ChangedFiles.Sum(file => file.AddedLines);
+        metrics.DeletedLines = metrics.ChangedFiles.Sum(file => file.DeletedLines);
+        metrics.DiffBytes = Encoding.UTF8.GetByteCount(diffText);
+        metrics.Extensions = metrics.ChangedFiles
+            .GroupBy(file => string.IsNullOrWhiteSpace(file.Extension) ? "<none>" : file.Extension, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        metrics.AddedPackages = ExtractPackageReferences(packageLines.Stdout);
+        return metrics;
+    }
+
+    private static List<PackageReferenceMetric> ExtractPackageReferences(string text)
+    {
+        var packages = new SortedDictionary<string, PackageReferenceMetric>(StringComparer.OrdinalIgnoreCase);
+        var regex = new Regex("<PackageReference\\s+[^>]*Include=\\\"(?<id>[^\\\"]+)\\\"[^>]*(?:Version=\\\"(?<version>[^\\\"]+)\\\")?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        foreach (Match match in regex.Matches(text))
+        {
+            var id = match.Groups["id"].Value;
+            var version = match.Groups["version"].Success ? match.Groups["version"].Value : string.Empty;
+            if (!packages.ContainsKey(id)) packages[id] = new PackageReferenceMetric { Id = id, Version = version };
+        }
+        return packages.Values.ToList();
+    }
+
     private async Task<ValidationResult> ValidateScenarioAsync(string workspace, BenchmarkTask task, string model, int repetition, TimeSpan timeout)
     {
         var validationContext = CreateValidationContext(workspace, task, model, repetition);
@@ -240,7 +326,7 @@ sealed class BenchmarkApp(CliOptions options)
         var publicItems = items.Where(item => IsPublicSuite(item.Suite)).ToArray();
         var hiddenItems = items.Where(item => IsHiddenSuite(item.Suite)).ToArray();
 
-        var publicEvaluations = await ValidateEvaluationItemsAsync(workspace, publicItems, timeout, validationContext);
+        var publicEvaluations = await ValidateEvaluationItemsAsync(workspace, publicItems, timeout, validationContext, stopOnFailure: !usesExplicitEvaluationItems);
         var hiddenEvaluations = new List<EvaluationItemResult>();
 
         if (publicEvaluations.All(item => item.Passed) && hiddenItems.Length > 0)
@@ -251,7 +337,7 @@ sealed class BenchmarkApp(CliOptions options)
                 CopyDirectory(hiddenSource, Path.Combine(workspace, "hidden-tests"));
             }
 
-            hiddenEvaluations = await ValidateEvaluationItemsAsync(workspace, hiddenItems, timeout, validationContext);
+            hiddenEvaluations = await ValidateEvaluationItemsAsync(workspace, hiddenItems, timeout, validationContext, stopOnFailure: !usesExplicitEvaluationItems);
         }
 
         var evaluations = publicEvaluations.Concat(hiddenEvaluations).ToList();
@@ -274,7 +360,7 @@ sealed class BenchmarkApp(CliOptions options)
         };
     }
 
-    private async Task<List<EvaluationItemResult>> ValidateEvaluationItemsAsync(string workspace, BenchmarkEvaluationItem[] items, TimeSpan defaultTimeout, ValidationContext validationContext)
+    private async Task<List<EvaluationItemResult>> ValidateEvaluationItemsAsync(string workspace, BenchmarkEvaluationItem[] items, TimeSpan defaultTimeout, ValidationContext validationContext, bool stopOnFailure)
     {
         var outputs = new List<EvaluationItemResult>();
         foreach (var item in items)
@@ -314,7 +400,7 @@ sealed class BenchmarkApp(CliOptions options)
                 Passed = passed
             });
 
-            if (!passed) break;
+            if (!passed && stopOnFailure) break;
         }
 
         return outputs;
@@ -452,12 +538,12 @@ sealed class BenchmarkApp(CliOptions options)
         sb.AppendLine();
         sb.AppendLine($"Benchmark version: `{report.BenchmarkVersion}`");
         sb.AppendLine();
-        sb.AppendLine("| Task | Model | Rep | Passed | Eval points | Attempts | Provider errors | Duration ms | TTFT ms | Tool calls | Bash | Tokens in | Tokens out | Cost |");
-        sb.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+        sb.AppendLine("| Task | Model | Rep | Passed | Eval points | Files | Lines +/- | Projects | Packages | Attempts | Provider errors | Duration ms | TTFT ms | Tool calls | Bash | Tokens in | Tokens out | Cost |");
+        sb.AppendLine("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
         foreach (var r in report.Results)
         {
             var providerErrorCount = r.ProviderRetryErrors.Count + r.ProviderErrors.Count;
-            sb.AppendLine($"| {r.TaskId} | `{r.Model}` | {r.Repetition} | {r.Passed} | {r.Validation.EarnedWeight:0.##}/{r.Validation.TotalWeight:0.##} | {r.AgentAttempts} | {providerErrorCount} | {r.DurationMs} | {r.TimeToFirstTokenMs?.ToString() ?? ""} | {r.PiMetrics.ToolCalls} | {r.PiMetrics.BashCalls} | {r.PiMetrics.InputTokens} | {r.PiMetrics.OutputTokens} | {r.PiMetrics.TotalCost:0.####} |");
+            sb.AppendLine($"| {r.TaskId} | `{r.Model}` | {r.Repetition} | {r.Passed} | {r.Validation.EarnedWeight:0.##}/{r.Validation.TotalWeight:0.##} | {r.DiffMetrics.TotalChangedFileCount} | +{r.DiffMetrics.AddedLines}/-{r.DiffMetrics.DeletedLines} | {r.DiffMetrics.ProjectCount} | {r.DiffMetrics.AddedPackages.Count} | {r.AgentAttempts} | {providerErrorCount} | {r.DurationMs} | {r.TimeToFirstTokenMs?.ToString() ?? ""} | {r.PiMetrics.ToolCalls} | {r.PiMetrics.BashCalls} | {r.PiMetrics.InputTokens} | {r.PiMetrics.OutputTokens} | {r.PiMetrics.TotalCost:0.####} |");
         }
 
         var earnedWeight = report.Results.Sum(r => r.Validation.EarnedWeight);
@@ -592,7 +678,8 @@ sealed class BenchmarkApp(CliOptions options)
             "*.user",
             "TestResults/",
             "**/TestResults/",
-            "codepass-quality.json"
+            "codepass-quality.json",
+            "diff-metrics.json"
         };
 
         var builder = new StringBuilder(existing);
@@ -931,6 +1018,7 @@ sealed class ModelRunResult
     public int AgentAttempts { get; set; } = 1;
     public List<string> ProviderRetryErrors { get; set; } = [];
     public List<string> ProviderErrors { get; set; } = [];
+    public DiffMetrics DiffMetrics { get; set; } = new();
     public ValidationResult Validation { get; set; } = new();
     public bool Passed { get; set; }
 }
@@ -948,6 +1036,37 @@ sealed class PiMetrics
     public decimal TotalCost { get; set; }
     public List<string> AssistantErrors { get; set; } = [];
     public string AssistantText { get; set; } = "";
+}
+
+sealed class DiffMetrics
+{
+    public int TotalChangedFileCount { get; set; }
+    public int AddedFileCount { get; set; }
+    public int ModifiedFileCount { get; set; }
+    public int DeletedFileCount { get; set; }
+    public int RenamedFileCount { get; set; }
+    public int AddedLines { get; set; }
+    public int DeletedLines { get; set; }
+    public int DiffBytes { get; set; }
+    public int ProjectCount { get; set; }
+    public Dictionary<string, int> Extensions { get; set; } = [];
+    public List<PackageReferenceMetric> AddedPackages { get; set; } = [];
+    public List<ChangedFileMetric> ChangedFiles { get; set; } = [];
+}
+
+sealed class ChangedFileMetric
+{
+    public string Path { get; set; } = "";
+    public string Status { get; set; } = "";
+    public string Extension { get; set; } = "";
+    public int AddedLines { get; set; }
+    public int DeletedLines { get; set; }
+}
+
+sealed class PackageReferenceMetric
+{
+    public string Id { get; set; } = "";
+    public string Version { get; set; } = "";
 }
 
 sealed class ValidationResult

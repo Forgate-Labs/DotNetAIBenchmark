@@ -44,7 +44,9 @@ The rendered UI must include stable selectors for deterministic validation:
 
 ## Architecture requirements
 
-- Use ViewModels for UI state and UI actions.
+- Use multiple focused ViewModels for UI state and UI actions.
+- Create at least `ChatPageViewModel`, `ConversationSidebarViewModel`, and `MessageComposerViewModel`.
+- ViewModels should expose bindable state through `INotifyPropertyChanged` or an observable base class.
 - Keep business/chat orchestration out of Razor components.
 - Use abstractions for services, such as interfaces for chat response generation and conversation state/persistence.
 - Register dependencies through DI.

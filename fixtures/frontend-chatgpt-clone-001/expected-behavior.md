@@ -16,7 +16,7 @@ Expected engineering behavior:
 
 - Tailwind CSS is configured and used for styling.
 - The main web project and solution file are at the workspace root.
-- The design follows MVVM: ViewModels own UI state/actions; Razor components focus on rendering and binding.
+- The design follows MVVM: multiple focused ViewModels own UI state/actions; Razor components focus on rendering and binding.
 - Services depend on abstractions and are registered through dependency injection.
 - Required UI components have corresponding automated component tests.
 - `README.md`, `Dockerfile`, and `docker-compose.yml` or `compose.yml` are present and meaningful.

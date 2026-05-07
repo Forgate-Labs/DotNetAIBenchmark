@@ -140,6 +140,7 @@ Each scenario run is isolated:
 8. Public and hidden validation commands run outside the agent. They run inside Docker by default; commands prefixed with `host:` run on the host from the workspace directory.
 9. Host validation commands receive unique `DOTNET_AI_BENCHMARK_VALIDATION_ID`, `DOTNET_AI_BENCHMARK_DOCKER_IMAGE_TAG`, and `COMPOSE_PROJECT_NAME` values so Docker resources do not collide during parallel runs.
 10. The final source diff is saved as `diff.patch`.
+11. Diagnostic diff metrics are saved as `diff-metrics.json` and included in reports. They capture changed files, added/deleted lines, project count, package references, and changed file extensions without affecting score.
 
 This keeps the generated diff focused on meaningful source changes and prevents build artifacts from polluting the benchmark result.
 

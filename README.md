@@ -409,7 +409,7 @@ Fields:
 - `prompt`: task text sent to pi.
 - `validationCommands`: legacy public validation commands executed after pi finishes, inside Docker by default, outside the agent. Prefix with `host:` to execute a command on the host.
 - `hiddenValidationCommands`: legacy hidden validation commands executed only after public validation passes. Hidden tests are copied into the workspace after the agent run, so the model cannot inspect them. Prefix with `host:` when validation needs host resources such as the Docker daemon.
-- `evaluationItems`: optional multi-point evaluation list. When present, the runner uses these items instead of `validationCommands` and `hiddenValidationCommands`, so one agent run can produce multiple scored checks.
+- `evaluationItems`: optional multi-point evaluation list. When present, the runner uses these items instead of `validationCommands` and `hiddenValidationCommands`, so one agent run can produce multiple scored checks. Explicit evaluation items do not stop at the first failed item; the runner executes all public items, and if they all pass, executes all hidden items.
 - `timeoutSeconds`: timeout for the pi run and validation commands.
 
 `evaluationItems` fields:
@@ -420,6 +420,19 @@ Fields:
 - `command`: validation command. Prefix with `host:` for host-side execution.
 - `weight`: score weight. Default is 1.
 - `timeoutSeconds`: optional item-specific timeout.
+
+Example with evaluation items:
+
+```json
+{"id":"frontend-chatgpt-clone-001","category":"frontend","fixture":"fixtures/frontend-chatgpt-clone-001","prompt":"Read task.md and expected-behavior.md, create the app, and run the public validation scripts.","validationCommands":[],"hiddenValidationCommands":[],"evaluationItems":[{"id":"frontend-build","name":"Build root solution","suite":"public","command":"bash tests/PublicTests/evaluate.sh build","weight":1},{"id":"frontend-docker","name":"Functional Dockerfile and compose","suite":"hidden","command":"host:bash hidden-tests/HiddenTests/evaluate.sh docker","weight":1}],"timeoutSeconds":1200}
+```
+
+Scoring model:
+
+- Legacy scenarios without `evaluationItems` contribute one point total: pass = 1, fail = 0.
+- Scenarios with `evaluationItems` contribute the sum of item weights.
+- Evaluation item metrics are reported even when some items fail.
+- Hidden evaluation items run only if every public evaluation item passes.
 
 ## What happens during a run
 
@@ -444,7 +457,7 @@ For each task/model/repetition, the CLI:
    - cache read/write tokens
    - total cost reported by pi
 10. Runs public and hidden validation commands outside the agent. Commands run inside Docker unless they use the `host:` prefix.
-11. Saves the workspace diff. Generated build artifacts are ignored so the patch focuses on source changes.
+11. Saves the workspace diff and diagnostic diff metrics such as changed files, added/deleted lines, project count, package references, and changed file extensions. These metrics are diagnostic only and do not affect score.
 12. Updates JSON and Markdown reports.
 
 ## Outputs
@@ -474,6 +487,7 @@ Important files:
 - `pi.attempt-*.stdout.jsonl`: raw pi JSON event stream for each attempt.
 - `pi.attempt-*.stderr.log`: pi/docker stderr for each attempt.
 - `diff.patch`: code changes made by the agent.
+- `diff-metrics.json`: diagnostic scope metrics for the final diff. These are not scored. It includes changed file counts, added/deleted lines, diff bytes, project count, package references, changed file extensions, and per-file line counts.
 
 ## Methodology
 
@@ -484,7 +498,8 @@ In short:
 - scenarios are small but realistic engineering tasks;
 - public tests provide the visible failure signal;
 - hidden tests are copied only after the agent run;
-- a scenario passes only when both public and hidden validation pass;
+- a legacy scenario passes only when both public and hidden validation pass;
+- scenarios with `evaluationItems` can report partial weighted score while still failing overall if any item fails;
 - Docker isolates the execution environment;
 - `diff.patch` is generated from a clean git baseline and ignores generated artifacts.
 
@@ -499,7 +514,7 @@ The current dataset contains 21 scenarios. Legacy scenarios contribute one evalu
 - 2 performance scenarios.
 - 2 architectural refactoring scenarios.
 - 2 unit/integration testing scenarios.
-- 1 frontend application creation scenario scored as 12 evaluation items, including CodePass rule checks, vulnerable-package checks, and host-side Docker artifact validation.
+- 1 frontend application creation scenario scored as 12 evaluation items, including MVVM/SOLID checks, CodePass rule checks, vulnerable-package checks, diagnostic diff metrics, and host-side Docker artifact validation.
 
 Each scenario has:
 
@@ -511,6 +526,23 @@ fixtures/<scenario-id>/
 ├── tests/          # public tests visible to the agent
 └── hidden-tests/   # hidden tests copied only after the agent run
 ```
+
+The frontend scenario currently has these 12 evaluation items:
+
+| Evaluation item | Suite | Purpose |
+|---|---|---|
+| `frontend-root-layout` | public | Root-level Blazor project and solution layout. |
+| `frontend-build` | public | Root solution builds successfully. |
+| `frontend-chat-ui-contract` | public | Required components and stable `data-testid` selectors exist. |
+| `frontend-tailwind` | public | Tailwind setup is present and no custom inline CSS/JS is used. |
+| `frontend-component-tests` | public | Component tests exist and run. |
+| `frontend-vulnerable-packages` | public | `dotnet list package --vulnerable --include-transitive` reports no vulnerable packages. |
+| `frontend-chat-behavior` | hidden | Interaction tests cover prompt input, send behavior, and assistant response. |
+| `frontend-mvvm` | hidden | Multiple focused ViewModels and bindable state. |
+| `frontend-solid` | hidden | Abstractions, DI registration, focused components, and no service construction in Razor. |
+| `frontend-security` | hidden | Secret scan and CodePass security rules. |
+| `frontend-docker` | hidden, host | Dockerfile and compose validation, including `docker build` when the host Docker daemon is available. |
+| `frontend-readme` | hidden | Setup, run, test, Docker, compose, and Tailwind documentation. |
 
 Run a public suite manually:
 
