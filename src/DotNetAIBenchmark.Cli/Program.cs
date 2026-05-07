@@ -235,6 +235,7 @@ sealed class BenchmarkApp(CliOptions options)
     private async Task<ValidationResult> ValidateScenarioAsync(string workspace, BenchmarkTask task, string model, int repetition, TimeSpan timeout)
     {
         var validationContext = CreateValidationContext(workspace, task, model, repetition);
+        var usesExplicitEvaluationItems = task.EvaluationItems.Length > 0;
         var items = GetEvaluationItems(task);
         var publicItems = items.Where(item => IsPublicSuite(item.Suite)).ToArray();
         var hiddenItems = items.Where(item => IsHiddenSuite(item.Suite)).ToArray();
@@ -257,12 +258,13 @@ sealed class BenchmarkApp(CliOptions options)
         var commands = evaluations.Select(ToValidationCommandResult).ToList();
         var publicCommands = publicEvaluations.Select(ToValidationCommandResult).ToList();
         var hiddenCommands = hiddenEvaluations.Select(ToValidationCommandResult).ToList();
-        var totalWeight = items.Sum(item => item.Weight <= 0 ? 1 : item.Weight);
-        var earnedWeight = evaluations.Where(item => item.Passed).Sum(item => item.Weight);
+        var passed = evaluations.Count == items.Length && evaluations.All(item => item.Passed);
+        var totalWeight = usesExplicitEvaluationItems ? items.Sum(item => item.Weight <= 0 ? 1 : item.Weight) : 1;
+        var earnedWeight = usesExplicitEvaluationItems ? evaluations.Where(item => item.Passed).Sum(item => item.Weight) : (passed ? 1 : 0);
 
         return new ValidationResult
         {
-            Passed = evaluations.Count == items.Length && evaluations.All(item => item.Passed),
+            Passed = passed,
             EarnedWeight = earnedWeight,
             TotalWeight = totalWeight,
             EvaluationItems = evaluations,
